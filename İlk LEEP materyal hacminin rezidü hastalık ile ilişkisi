@@ -1,0 +1,63 @@
+# ======================================================================
+# 22. OR, %95 GA VE p
+# ======================================================================
+#
+# Lojistik regresyon sonucu OR ve %95 güven aralığı ile
+# raporlanmaktadır.
+#
+# broom::tidy() model sonuçlarını düzenli tablo biçimine getirir.
+#
+# ======================================================================
+
+sonuc_1ay <- broom::tidy(
+  model_1ay,
+  exponentiate = TRUE,
+  conf.int = TRUE
+) %>%
+  filter(term == "sure_ay")
+
+OR_1ay     <- sonuc_1ay$estimate
+Alt95_1ay  <- sonuc_1ay$conf.low
+Ust95_1ay  <- sonuc_1ay$conf.high
+p_logistik <- sonuc_1ay$p.value
+
+
+# ======================================================================
+# 23. HER 3 AYLIK ARTIŞ İÇİN OR
+# ======================================================================
+#
+# Klinik olarak daha kolay yorumlanabilmesi için süre ayrıca
+# 3 aylık birimlere ölçeklenmektedir:
+#
+# sure_3ay = sure_ay / 3
+#
+# Böylece model katsayısı doğrudan her 3 aylık süre artışını
+# temsil eder.
+#
+# Bu model 1 aylık modelle aynı temel ilişkiyi farklı bir
+# ölçekte ifade eder; yeni veya bağımsız bir analiz değildir.
+#
+# ======================================================================
+
+analiz <- analiz %>%
+  mutate(
+    sure_3ay = sure_ay / 3
+  )
+
+model_3ay <- glm(
+  rezidu ~ sure_3ay,
+  data = analiz,
+  family = binomial(link = "logit")
+)
+
+sonuc_3ay <- broom::tidy(
+  model_3ay,
+  exponentiate = TRUE,
+  conf.int = TRUE
+) %>%
+  filter(term == "sure_3ay")
+
+OR_3ay    <- sonuc_3ay$estimate
+Alt95_3ay <- sonuc_3ay$conf.low
+Ust95_3ay <- sonuc_3ay$conf.high
+p_3ay     <- sonuc_3ay$p.value
