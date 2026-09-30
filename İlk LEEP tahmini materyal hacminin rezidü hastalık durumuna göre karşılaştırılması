@@ -1,0 +1,1196 @@
+# ======================================================================
+# 4. ANALİZ (v2 - DÜZELTİLMİŞ)
+# İLK LEEP'TE ÇIKARILAN TAHMİNİ MATERYAL HACMİ
+# VE REZİDÜ HASTALIK İLE İLİŞKİSİ
+#
+# Phadnis et al. BJOG 2010
+#
+# Hemiellipsoid hacim modeli:
+#
+# V = (1/2) × (4/3) × pi × (a/2) × (b/2) × c
+#
+# Sadeleştirilmiş form:
+#
+# V = (pi / 6) × a × b × c
+#
+# a = transverse diameter
+# b = longitudinal diameter
+# c = specimen depth
+#
+# Bizim veri setimizde:
+# a = 3–9 ekseni
+# b = 6–12 ekseni
+# c = Os kalınlığı / materyal derinliği
+#
+# Ölçümler cm olduğundan hacim cm³ olarak elde edilir.
+#
+# ÖNEMLİ:
+# Bu değer doğrudan fiziksel olarak ölçülmüş hacim değildir.
+# "Tahmini LEEP materyal hacmi" olarak raporlanacaktır.
+#
+# ----------------------------------------------------------------------
+# BU SÜRÜMDE (v2) YAPILAN DÜZELTMELER:
+#
+# 1) FORMÜL KATSAYISI DÜZELTİLDİ.
+#
+#    ESKİ (YANLIŞ) SÜRÜM:
+#
+#      V = (1/2) × (4/3) × pi × (a/2) × (b/2) × (c/2)
+#        = (pi / 12) × a × b × c
+#
+#    Bu, DERİNLİĞİ (c) de ikiye bölüyordu. Ama Phadnis (2010)
+#    formülünde sadece a ve b (çap oldukları için yarıçapa
+#    çevrilmeleri gerekiyor) ikiye bölünür; c (derinlik) zaten
+#    bir yükseklik değeridir, çapa değil - bu yüzden bölünmez.
+#
+#    Bu, Phadnis (2010)'u birebir aktaran bağımsız bir yayında
+#    (Montanari ve ark., Arch Gynecol Obstet 2018, formülü
+#    "(1/2) × (4/3) × π × (length/2) × (width/2) × depth"
+#    olarak, derinliği BÖLMEDEN aktarıyor) doğrulanmıştır.
+#
+#    DOĞRU SÜRÜM:
+#
+#      V = (1/2) × (4/3) × pi × (a/2) × (b/2) × c
+#        = (pi / 6) × a × b × c
+#
+#    ESKİ FORMÜL, GERÇEK HACMİN TAM YARISINI VERİYORDU.
+#    Bu değişiklik Mann-Whitney p-değerini, Shapiro-Wilk'i,
+#    ROC AUC/sensitivite/spesifisiteyi DEĞİŞTİRMEZ (hepsi
+#    sabit pozitif katsayıya duyarsızdır). Ama tanımlayıcı
+#    istatistikleri (ortalama, medyan, min, maks), lojistik
+#    regresyondaki OR'u ("her 1 cm³ artış için") ve ROC'taki
+#    Youden eşik değerini (cm³) DEĞİŞTİRİR - hepsi artık
+#    doğru, literatürle karşılaştırılabilir ölçekte.
+#
+# 2) DOSYA YOLLARI DÜZELTİLDİ.
+#
+#    Eskiden çıktı dosyaları (html, docx, xlsx, png) GÖRELİ
+#    yol ile kaydediliyordu (örn. "Tablo_4_....html"), bu da
+#    R'ın o anki çalışma klasörüne (getwd()) bağlı olarak
+#    Table 1/2/3'ün gittiği klasörden FARKLI bir yere
+#    düşmesine yol açabilirdi. Şimdi hepsi diğer scriptlerle
+#    TUTARLI şekilde, sabit "/Users/abdullah/Desktop/ablam
+#    tez/" klasörüne kaydediliyor.
+# ======================================================================
+
+
+# ----------------------------------------------------------------------
+# 0. ÇALIŞMA ORTAMINI TEMİZLE
+# ----------------------------------------------------------------------
+
+rm(list = ls())
+
+
+# ----------------------------------------------------------------------
+# 1. GEREKLİ PAKETLER
+# ----------------------------------------------------------------------
+
+gerekli_paketler <- c(
+  "readxl",
+  "dplyr",
+  "ggplot2",
+  "pROC",
+  "broom",
+  "gt",
+  "writexl",
+  "flextable",
+  "officer"
+)
+
+yuklu_paketler <- rownames(installed.packages())
+
+for (p in gerekli_paketler) {
+  if (!(p %in% yuklu_paketler)) {
+    install.packages(p, dependencies = TRUE)
+  }
+}
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(pROC)
+library(broom)
+library(gt)
+library(writexl)
+library(flextable)
+library(officer)
+
+
+# ----------------------------------------------------------------------
+# 2. ÇIKTI KLASÖRÜ (YENİ - tek yerden yönetiliyor)
+# ----------------------------------------------------------------------
+#
+# Diğer analizlerle (Table 1, Table 2/3) aynı klasör kullanılıyor,
+# böylece tüm tez çıktılarınız tek bir yerde toplanır.
+# ----------------------------------------------------------------------
+
+cikti_klasoru <- "/Users/abdullah/Desktop/ablam tez"
+
+if (!dir.exists(cikti_klasoru)) {
+
+  stop(
+    "Çıktı klasörü bulunamadı: ", cikti_klasoru,
+    "\nLütfen 'cikti_klasoru' değişkenini kontrol edin."
+  )
+
+}
+
+
+# ----------------------------------------------------------------------
+# 3. EXCEL DOSYASINI OKU
+# ----------------------------------------------------------------------
+
+leep_yolu <- file.path(cikti_klasoru, "leep_tlh.xlsx")
+
+if (!file.exists(leep_yolu)) {
+
+  stop(
+    "Dosya bulunamadı: ", leep_yolu,
+    "\nLütfen 'leep_yolu' değişkenini kontrol edin."
+  )
+
+}
+
+# İlk Excel satırı grup başlıklarından oluştuğu için skip = 1.
+veri <- read_excel(
+  leep_yolu,
+  sheet = "Sayfa1",
+  skip = 1
+)
+
+cat("\nVeri boyutu:\n")
+print(dim(veri))
+
+
+# ----------------------------------------------------------------------
+# 4. DEĞİŞKEN İSİMLERİNİ DÜZENLE
+# ----------------------------------------------------------------------
+#
+# names(veri) <- c(...) TAM VEKTÖR ataması yapıyoruz. Bu, sütun
+# sayısı 34 değilse R'ın otomatik olarak hata vermesini sağlar
+# ("names attribute must be the same length as the vector") -
+# yanlış sütuna yanlış isim verilmesi riskine karşı ekstra bir
+# kontrol kodu yazmaya gerek bırakmıyor.
+# ----------------------------------------------------------------------
+
+names(veri) <- c(
+  "hasta_id",
+  "yas",
+  "bmi",
+  "gravida",
+  "parite",
+  "abortus",
+  "nsd",
+  "cs",
+  "menopoz",
+  "leep_konizasyon",
+  "ilk_leep_tarihi",
+  "eksen_3_9",
+  "eksen_6_12",
+  "os_kalinligi",
+  "materyal_butunlugu",
+  "parca_sayisi",
+  "termal_artefakt",
+  "lezyon_derecesi",
+  "ecc",
+  "glanduler_tutulum",
+  "cerrahi_sinir",
+  "sinir_pozitif_yeri",
+  "ki67",
+  "p16",
+  "reeksizyon_yontemi",
+  "reeksizyon_tarihi",
+  "rezidu",
+  "rezidu_derecesi",
+  "ikinci_sinir",
+  "ikinci_glanduler_tutulum",
+  "notlar",
+  "sigara",
+  "paket_yil",
+  "diger"
+)
+
+
+# ----------------------------------------------------------------------
+# 5. GEREKLİ DEĞİŞKENLERİ NUMERİK HALE GETİR
+# ----------------------------------------------------------------------
+
+veri <- veri %>%
+  mutate(
+    eksen_3_9 =
+      suppressWarnings(as.numeric(eksen_3_9)),
+
+    eksen_6_12 =
+      suppressWarnings(as.numeric(eksen_6_12)),
+
+    os_kalinligi =
+      suppressWarnings(as.numeric(os_kalinligi)),
+
+    rezidu =
+      suppressWarnings(as.numeric(rezidu))
+  )
+
+
+# ----------------------------------------------------------------------
+# 6. REZİDÜ HASTALIK DEĞİŞKENİNİ OLUŞTUR
+# ----------------------------------------------------------------------
+#
+# Kod kitabı:
+# 0 = Rezidü hastalık yok
+# 1 = Rezidü hastalık var
+#
+# Kod 2 ve diğer değerler binary outcome açısından geçerli
+# kabul edilmeyecektir.
+# ----------------------------------------------------------------------
+
+veri <- veri %>%
+  mutate(
+
+    rezidu_binary = case_when(
+      rezidu == 0 ~ 0,
+      rezidu == 1 ~ 1,
+      TRUE ~ NA_real_
+    ),
+
+    rezidu_grup = factor(
+      rezidu_binary,
+      levels = c(0, 1),
+      labels = c(
+        "Rezidü negatif",
+        "Rezidü pozitif"
+      )
+    )
+  )
+
+
+gecersiz_rezidu <- veri %>%
+
+  mutate(satir_no = row_number()) %>%
+
+  filter(
+    !is.na(rezidu),
+    !(rezidu %in% c(0, 1))
+  ) %>%
+
+  select(satir_no, hasta_id, rezidu, notlar)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("GEÇERSİZ REZİDÜ KODU OLAN HASTALAR (analiz dışı kalacak)\n")
+cat("============================================================\n")
+print(gecersiz_rezidu)
+
+
+# ----------------------------------------------------------------------
+# 7. PHADNIS FORMÜLÜNE GÖRE TAHMİNİ LEEP HACMİNİ HESAPLA (v2 - DÜZELTİLDİ)
+# ----------------------------------------------------------------------
+#
+# Phadnis hemiellipsoid modeli:
+#
+# V = (1/2) × (4/3) × pi × (a/2) × (b/2) × c
+#   = (pi / 6) × a × b × c
+#
+# a = 3–9 ekseni (transverse diameter - ÇAP, bu yüzden /2)
+# b = 6–12 ekseni (longitudinal diameter - ÇAP, bu yüzden /2)
+# c = Os kalınlığı / materyal derinliği (DERİNLİK - zaten bir
+#     yükseklik/radius değeri, çap DEĞİL - bu yüzden BÖLÜNMEZ)
+#
+# Tüm ölçüler cm ise sonuç cm³ olur.
+# ----------------------------------------------------------------------
+
+veri <- veri %>%
+  mutate(
+
+    leep_hacim_cm3 =
+      (pi / 6) *
+      eksen_3_9 *
+      eksen_6_12 *
+      os_kalinligi
+
+  )
+
+
+# ----------------------------------------------------------------------
+# 8. VERİ KALİTE KONTROLÜ
+# ----------------------------------------------------------------------
+
+cat("\n")
+cat("============================================================\n")
+cat("HACİM HESAPLAMASI - VERİ KONTROLÜ\n")
+cat("============================================================\n")
+
+cat("\n3–9 ekseni (cm):\n")
+print(summary(veri$eksen_3_9))
+
+cat("\n6–12 ekseni (cm):\n")
+print(summary(veri$eksen_6_12))
+
+cat("\nOs kalınlığı / derinliği (cm):\n")
+print(summary(veri$os_kalinligi))
+
+cat("\nTahmini LEEP materyal hacmi (cm³) - düzeltilmiş formül:\n")
+print(summary(veri$leep_hacim_cm3))
+
+
+# Sıfır veya negatif değer kontrolü
+
+cat("\nSıfır veya negatif ölçüm kontrolü:\n")
+
+print(
+  veri %>%
+    summarise(
+      eksen_3_9_sorun =
+        sum(eksen_3_9 <= 0, na.rm = TRUE),
+
+      eksen_6_12_sorun =
+        sum(eksen_6_12 <= 0, na.rm = TRUE),
+
+      os_kalinligi_sorun =
+        sum(os_kalinligi <= 0, na.rm = TRUE)
+    )
+)
+
+
+# ----------------------------------------------------------------------
+# 9. ANA ANALİZ POPÜLASYONUNU OLUŞTUR
+# ----------------------------------------------------------------------
+#
+# Analize:
+#
+# 1. Geçerli rezidü sonucu olan
+# 2. Hacmi hesaplanabilen
+# 3. Hacmi > 0 olan
+#
+# hastalar dahil edilir.
+# ----------------------------------------------------------------------
+
+hacim_analiz <- veri %>%
+  filter(
+    !is.na(rezidu_binary),
+    !is.na(leep_hacim_cm3),
+    leep_hacim_cm3 > 0
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("ANALİZ POPÜLASYONU\n")
+cat("============================================================\n")
+
+cat("\nToplam N:\n")
+print(nrow(hacim_analiz))
+
+cat("\nRezidü grupları:\n")
+print(table(hacim_analiz$rezidu_grup))
+
+
+# ----------------------------------------------------------------------
+# 10. EKSİK HACİM VERİSİNİ KONTROL ET
+# ----------------------------------------------------------------------
+
+eksik_hacim <- veri %>%
+  filter(!is.na(rezidu_binary)) %>%
+  summarise(
+
+    Gecerli_rezidu_N = n(),
+
+    Hacim_mevcut_N =
+      sum(!is.na(leep_hacim_cm3)),
+
+    Hacim_eksik_N =
+      sum(is.na(leep_hacim_cm3))
+
+  )
+
+
+cat("\nEksik hacim bilgisi:\n")
+print(eksik_hacim)
+
+
+# ----------------------------------------------------------------------
+# 11. GRUPLARA GÖRE TANIMLAYICI İSTATİSTİKLER
+# ----------------------------------------------------------------------
+
+hacim_tanimlayici <- hacim_analiz %>%
+  group_by(rezidu_grup) %>%
+  summarise(
+
+    N = n(),
+
+    Ortalama =
+      mean(leep_hacim_cm3),
+
+    SD =
+      sd(leep_hacim_cm3),
+
+    Medyan =
+      median(leep_hacim_cm3),
+
+    Q1 =
+      quantile(
+        leep_hacim_cm3,
+        0.25
+      ),
+
+    Q3 =
+      quantile(
+        leep_hacim_cm3,
+        0.75
+      ),
+
+    Minimum =
+      min(leep_hacim_cm3),
+
+    Maksimum =
+      max(leep_hacim_cm3),
+
+    .groups = "drop"
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("TANIMLAYICI İSTATİSTİKLER (düzeltilmiş hacim, cm³)\n")
+cat("============================================================\n")
+
+print(hacim_tanimlayici)
+
+
+# ----------------------------------------------------------------------
+# 12. DAĞILIM KONTROLÜ
+# ----------------------------------------------------------------------
+
+# Histogram
+
+grafik_histogram <- ggplot(
+  hacim_analiz,
+  aes(x = leep_hacim_cm3)
+) +
+  geom_histogram(
+    bins = 12,
+    fill = "grey80",
+    color = "black"
+  ) +
+  facet_wrap(~ rezidu_grup) +
+  labs(
+    title = "Tahmini LEEP materyal hacminin dağılımı",
+    subtitle = "Phadnis hemiellipsoid formülü",
+    x = "Tahmini LEEP materyal hacmi (cm³)",
+    y = "Hasta sayısı"
+  ) +
+  theme_classic(base_size = 12)
+
+print(grafik_histogram)
+
+
+# Q-Q grafiği
+
+grafik_qq <- ggplot(
+  hacim_analiz,
+  aes(sample = leep_hacim_cm3)
+) +
+  stat_qq() +
+  stat_qq_line() +
+  facet_wrap(~ rezidu_grup) +
+  labs(
+    title = "Tahmini LEEP materyal hacmi Q-Q grafiği",
+    subtitle = "Phadnis hemiellipsoid formülü"
+  ) +
+  theme_classic(base_size = 12)
+
+print(grafik_qq)
+
+
+# ----------------------------------------------------------------------
+# 13. SHAPIRO-WILK TESTİ
+# ----------------------------------------------------------------------
+
+shapiro_sonuc <- hacim_analiz %>%
+  group_by(rezidu_grup) %>%
+  group_modify(
+    ~ data.frame(
+
+      N = nrow(.x),
+
+      W =
+        unname(
+          shapiro.test(
+            .x$leep_hacim_cm3
+          )$statistic
+        ),
+
+      p_degeri =
+        shapiro.test(
+          .x$leep_hacim_cm3
+        )$p.value
+    )
+  ) %>%
+  ungroup()
+
+
+cat("\n")
+cat("============================================================\n")
+cat("SHAPIRO-WILK\n")
+cat("============================================================\n")
+
+print(shapiro_sonuc)
+
+
+# ----------------------------------------------------------------------
+# 14. ANA İSTATİSTİKSEL KARŞILAŞTIRMA
+#     MANN-WHITNEY U TESTİ
+# ----------------------------------------------------------------------
+#
+# Hacim dağılımının olası çarpıklığı, küçük örneklem ve aynı
+# değerlerin bulunabilmesi nedeniyle ana karşılaştırma
+# Mann-Whitney U testi ile yapılmaktadır.
+#
+# NOT: Formül katsayısı düzeltmesi (Bölüm 7) bu testin p
+# değerini DEĞİŞTİRMEZ - Mann-Whitney sıralamalara (rank)
+# dayanır ve sabit pozitif bir katsayıyla çarpmaya duyarsızdır.
+#
+# exact = FALSE ties nedeniyle oluşabilecek uyarıları engeller.
+# ----------------------------------------------------------------------
+
+mann_whitney <- wilcox.test(
+  leep_hacim_cm3 ~ rezidu_grup,
+  data = hacim_analiz,
+  exact = FALSE
+)
+
+
+p_mann <- mann_whitney$p.value
+
+
+cat("\n")
+cat("============================================================\n")
+cat("MANN-WHITNEY U TESTİ\n")
+cat("============================================================\n")
+
+print(mann_whitney)
+
+
+# ----------------------------------------------------------------------
+# 15. DESTEKLEYİCİ WELCH T-TESTİ
+# ----------------------------------------------------------------------
+
+welch_test <- t.test(
+  leep_hacim_cm3 ~ rezidu_grup,
+  data = hacim_analiz,
+  var.equal = FALSE
+)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("WELCH T-TESTİ - DESTEKLEYİCİ ANALİZ\n")
+cat("============================================================\n")
+
+print(welch_test)
+
+
+# ======================================================================
+# 16. YAYINA / TEZE UYGUN ANA TABLOYU OLUŞTUR
+# ======================================================================
+#
+# Bu tablo:
+#
+# - Her grubun N sayısını
+# - Ortalama ± SS
+# - Medyan (Q1–Q3)
+# - Mann-Whitney p değerini
+#
+# birlikte gösterecektir.
+#
+# Ana karşılaştırma medyan/rank temelli olduğu için p değeri
+# Mann-Whitney U testinden alınmaktadır (Welch t-testi yalnızca
+# destekleyici/karşılaştırma amaçlı konsolda raporlanmıştır,
+# ana tabloya dahil edilmemiştir).
+# ======================================================================
+
+
+# Rezidü negatif grup
+
+negatif <- hacim_analiz %>%
+  filter(rezidu_binary == 0)
+
+
+# Rezidü pozitif grup
+
+pozitif <- hacim_analiz %>%
+  filter(rezidu_binary == 1)
+
+
+# Grup istatistiklerini metin formatında hazırla
+
+negatif_ortalama <- sprintf(
+  "%.2f ± %.2f",
+  mean(negatif$leep_hacim_cm3),
+  sd(negatif$leep_hacim_cm3)
+)
+
+
+pozitif_ortalama <- sprintf(
+  "%.2f ± %.2f",
+  mean(pozitif$leep_hacim_cm3),
+  sd(pozitif$leep_hacim_cm3)
+)
+
+
+negatif_medyan <- sprintf(
+  "%.2f (%.2f–%.2f)",
+  median(negatif$leep_hacim_cm3),
+  quantile(negatif$leep_hacim_cm3, 0.25),
+  quantile(negatif$leep_hacim_cm3, 0.75)
+)
+
+
+pozitif_medyan <- sprintf(
+  "%.2f (%.2f–%.2f)",
+  median(pozitif$leep_hacim_cm3),
+  quantile(pozitif$leep_hacim_cm3, 0.25),
+  quantile(pozitif$leep_hacim_cm3, 0.75)
+)
+
+
+# P değerini bilimsel gösterime uygun biçimde yaz
+
+p_yaz <- ifelse(
+  p_mann < 0.001,
+  "<0.001",
+  sprintf("%.3f", p_mann)
+)
+
+
+# Ana tablo veri seti
+
+tablo_hacim <- data.frame(
+
+  Degisken = c(
+    "Tahmini LEEP materyal hacmi, cm³",
+    "  Ortalama ± SS",
+    "  Medyan (Q1–Q3)"
+  ),
+
+  Rezidu_negatif = c(
+    paste0("n = ", nrow(negatif)),
+    negatif_ortalama,
+    negatif_medyan
+  ),
+
+  Rezidu_pozitif = c(
+    paste0("n = ", nrow(pozitif)),
+    pozitif_ortalama,
+    pozitif_medyan
+  ),
+
+  P_degeri = c(
+    "",
+    "",
+    p_yaz
+  ),
+
+  stringsAsFactors = FALSE
+)
+
+
+# ----------------------------------------------------------------------
+# 17. GT İLE PROFESYONEL TABLO
+# ----------------------------------------------------------------------
+
+tablo_hacim_gt <- tablo_hacim %>%
+
+  gt() %>%
+
+  cols_label(
+    Degisken = "Değişken",
+    Rezidu_negatif = "Rezidü negatif",
+    Rezidu_pozitif = "Rezidü pozitif",
+    P_degeri = "p"
+  ) %>%
+
+  tab_header(
+    title = md(
+      "**Tablo 4. İlk LEEP tahmini materyal hacminin rezidü hastalık durumuna göre karşılaştırılması**"
+    )
+  ) %>%
+
+  tab_source_note(
+    source_note = md(
+      paste0(
+        "**Not:** Tahmini LEEP materyal hacmi ",
+        "Phadnis ve ark. tarafından tanımlanan hemiellipsoid ",
+        "formülüne göre hesaplanmıştır: ",
+        "*V = (π/6) × 3–9 ekseni × 6–12 ekseni × ",
+        "materyal kalınlığı/derinliği*. ",
+        "Değerler cm³ olarak verilmiştir. ",
+        "p değeri Mann-Whitney U testine aittir."
+      )
+    )
+  ) %>%
+
+  tab_options(
+    table.font.names = "Times New Roman",
+    table.font.size = px(12),
+    heading.title.font.size = px(13),
+    source_notes.font.size = px(10)
+  )
+
+
+# Tabloyu ekranda göster
+
+tablo_hacim_gt
+
+
+# ----------------------------------------------------------------------
+# 18. TABLOYU HTML OLARAK KAYDET
+# ----------------------------------------------------------------------
+
+gtsave(
+  tablo_hacim_gt,
+  filename = file.path(
+    cikti_klasoru,
+    "Tablo_4_LEEP_hacim_rezidu.html"
+  )
+)
+
+
+# ======================================================================
+# 19. WORD İÇİN AYNI TABLOYU OLUŞTUR
+# ======================================================================
+
+tablo_word <- flextable(tablo_hacim)
+
+tablo_word <- set_header_labels(
+  tablo_word,
+
+  Degisken =
+    "Değişken",
+
+  Rezidu_negatif =
+    paste0(
+      "Rezidü negatif\n(n=",
+      nrow(negatif),
+      ")"
+    ),
+
+  Rezidu_pozitif =
+    paste0(
+      "Rezidü pozitif\n(n=",
+      nrow(pozitif),
+      ")"
+    ),
+
+  P_degeri =
+    "p"
+)
+
+
+# İlk satırdaki n bilgisi başlıkta zaten var.
+# Bu nedenle ilk satırda grup N'sini tekrar göstermiyoruz.
+
+tablo_word <- delete_rows(
+  tablo_word,
+  i = 1,
+  part = "body"
+)
+
+
+# Times New Roman
+
+tablo_word <- font(
+  tablo_word,
+  fontname = "Times New Roman",
+  part = "all"
+)
+
+tablo_word <- fontsize(
+  tablo_word,
+  size = 11,
+  part = "all"
+)
+
+
+# Başlığı kalın yap
+
+tablo_word <- bold(
+  tablo_word,
+  part = "header",
+  bold = TRUE
+)
+
+
+# Otomatik genişlik
+
+tablo_word <- autofit(tablo_word)
+
+
+# Tablo altına Phadnis notu eklemek için Word dokümanı
+
+doc <- read_docx()
+
+
+doc <- body_add_par(
+  doc,
+  value =
+    "Tablo 4. İlk LEEP tahmini materyal hacminin rezidü hastalık durumuna göre karşılaştırılması",
+  style = "heading 2"
+)
+
+
+doc <- body_add_flextable(
+  doc,
+  value = tablo_word
+)
+
+
+doc <- body_add_par(
+  doc,
+  value = paste0(
+    "Not: Tahmini LEEP materyal hacmi Phadnis ve ark. ",
+    "tarafından tanımlanan hemiellipsoid formülüne göre ",
+    "hesaplanmıştır: V = (π/6) × 3–9 ekseni × ",
+    "6–12 ekseni × materyal kalınlığı/derinliği. ",
+    "Değerler cm³ olarak verilmiştir. ",
+    "p değeri Mann-Whitney U testine aittir."
+  )
+)
+
+
+print(
+  doc,
+  target = file.path(
+    cikti_klasoru,
+    "Tablo_4_LEEP_hacim_rezidu.docx"
+  )
+)
+
+
+# ======================================================================
+# 20. BOX-PLOT
+# ======================================================================
+
+grafik_boxplot <- ggplot(
+  hacim_analiz,
+  aes(
+    x = rezidu_grup,
+    y = leep_hacim_cm3
+  )
+) +
+
+  geom_boxplot(
+    width = 0.55,
+    outlier.shape = NA
+  ) +
+
+  geom_jitter(
+    width = 0.08,
+    alpha = 0.65
+  ) +
+
+  labs(
+    title =
+      "Rezidü hastalık durumuna göre tahmini LEEP materyal hacmi",
+
+    subtitle =
+      "Phadnis hemiellipsoid formülü",
+
+    x = NULL,
+
+    y =
+      "Tahmini LEEP materyal hacmi (cm³)"
+  ) +
+
+  theme_classic(
+    base_size = 12,
+    base_family = "Times New Roman"
+  )
+
+
+print(grafik_boxplot)
+
+
+# ----------------------------------------------------------------------
+# 21. UNİVARIABLE LOJİSTİK REGRESYON
+# ----------------------------------------------------------------------
+#
+# OR:
+# Tahmini hacimde her 1 cm³ artış için rezidü hastalık odds
+# değişimini gösterir.
+#
+# NOT: Bu OR artık DÜZELTİLMİŞ (doğru ölçekli) hacim üzerinden
+# hesaplanıyor. Eski (yanlış, yarı ölçekli) formülle
+# hesaplanan OR ile SAYISAL OLARAK FARKLI olacaktır - bu
+# beklenen ve doğru bir değişikliktir.
+# ----------------------------------------------------------------------
+
+model_hacim <- glm(
+  rezidu_binary ~ leep_hacim_cm3,
+  data = hacim_analiz,
+  family = binomial(link = "logit")
+)
+
+
+lojistik_sonuc <- broom::tidy(
+  model_hacim,
+  conf.int = TRUE,
+  exponentiate = TRUE
+) %>%
+
+  filter(
+    term == "leep_hacim_cm3"
+  ) %>%
+
+  transmute(
+
+    Degisken =
+      "Tahmini LEEP hacmi (her 1 cm³ artış)",
+
+    OR =
+      estimate,
+
+    Alt_95_GA =
+      conf.low,
+
+    Ust_95_GA =
+      conf.high,
+
+    p_degeri =
+      p.value
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("LOJİSTİK REGRESYON (düzeltilmiş hacim ölçeği)\n")
+cat("============================================================\n")
+
+print(lojistik_sonuc)
+
+
+# ----------------------------------------------------------------------
+# 22. ROC ANALİZİ
+# ----------------------------------------------------------------------
+#
+# ROC analizi KEŞİFSEL analizdir.
+#
+# Buradan çıkan cut-off:
+#
+# "optimal cerrahi LEEP hacmi"
+#
+# olarak yorumlanmayacaktır.
+#
+# Yalnızca mevcut veri setinde rezidü pozitifliği ayıran
+# keşifsel eşik değeri olarak raporlanacaktır.
+#
+# NOT: AUC, sensitivite ve spesifisite formül düzeltmesinden
+# ETKİLENMEZ (monotonik dönüşüme duyarsız). Ama Youden eşik
+# değeri (cm³) artık doğru ölçekte - eski (yanlış) formülle
+# hesaplanan eşiğin YARISI değil, gerçek ölçekte raporlanıyor.
+# ----------------------------------------------------------------------
+
+roc_hacim <- pROC::roc(
+
+  response =
+    hacim_analiz$rezidu_binary,
+
+  predictor =
+    hacim_analiz$leep_hacim_cm3,
+
+  levels = c(0, 1),
+
+  direction = "auto",
+
+  ci = TRUE,
+
+  quiet = TRUE
+)
+
+
+auc <- as.numeric(
+  pROC::auc(roc_hacim)
+)
+
+
+auc_ci <- as.numeric(
+  pROC::ci.auc(roc_hacim)
+)
+
+
+youden <- pROC::coords(
+
+  roc_hacim,
+
+  x = "best",
+
+  best.method = "youden",
+
+  ret = c(
+    "threshold",
+    "sensitivity",
+    "specificity"
+  ),
+
+  transpose = FALSE
+)
+
+
+roc_sonuc <- data.frame(
+
+  AUC =
+    auc,
+
+  AUC_Alt_95_GA =
+    auc_ci[1],
+
+  AUC_Ust_95_GA =
+    auc_ci[3],
+
+  Youden_Esik_cm3 =
+    as.numeric(
+      youden$threshold
+    ),
+
+  Sensitivite =
+    as.numeric(
+      youden$sensitivity
+    ),
+
+  Spesifisite =
+    as.numeric(
+      youden$specificity
+    )
+)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("ROC ANALİZİ (düzeltilmiş hacim ölçeği)\n")
+cat("============================================================\n")
+
+print(roc_sonuc)
+
+
+# ----------------------------------------------------------------------
+# 23. SONUÇLARI EXCEL'E AKTAR
+# ----------------------------------------------------------------------
+
+write_xlsx(
+
+  list(
+
+    "Ana_Tablo" =
+      tablo_hacim,
+
+    "Tanimlayici" =
+      hacim_tanimlayici,
+
+    "Shapiro_Wilk" =
+      shapiro_sonuc,
+
+    "Lojistik_Regresyon" =
+      lojistik_sonuc,
+
+    "ROC" =
+      roc_sonuc
+
+  ),
+
+  path = file.path(
+    cikti_klasoru,
+    "LEEP_hacim_rezidu_analizi.xlsx"
+  )
+)
+
+
+# ----------------------------------------------------------------------
+# 24. GRAFİKLERİ KAYDET
+# ----------------------------------------------------------------------
+
+ggsave(
+  file.path(
+    cikti_klasoru,
+    "LEEP_hacim_rezidu_boxplot.png"
+  ),
+  grafik_boxplot,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
+
+ggsave(
+  file.path(
+    cikti_klasoru,
+    "LEEP_hacim_histogram.png"
+  ),
+  grafik_histogram,
+  width = 9,
+  height = 5.5,
+  dpi = 300
+)
+
+
+ggsave(
+  file.path(
+    cikti_klasoru,
+    "LEEP_hacim_QQ.png"
+  ),
+  grafik_qq,
+  width = 9,
+  height = 5.5,
+  dpi = 300
+)
+
+
+# ----------------------------------------------------------------------
+# 25. ANALİZ SONU
+# ----------------------------------------------------------------------
+
+cat("\n\n")
+cat("============================================================\n")
+cat("4. ANALİZ TAMAMLANDI (v2 - formül düzeltildi)\n")
+cat("============================================================\n")
+
+cat("\nHacim formülü (DÜZELTİLMİŞ):\n")
+
+cat(
+  "V = (pi / 6) × 3–9 ekseni × ",
+  "6–12 ekseni × materyal kalınlığı/derinliği\n"
+)
+
+cat("\nHacim birimi: cm³\n")
+
+cat(
+  "\nHacim, Phadnis ve ark. (BJOG 2010) ",
+  "hemiellipsoid formülüne göre tahmin edilmiştir.\n"
+)
+
+cat(
+  "\nAna grup karşılaştırması: Mann-Whitney U testi\n"
+)
+
+cat(
+  "Ek analizler: lojistik regresyon ve keşifsel ROC analizi\n"
+)
+
+if (nrow(gecersiz_rezidu) > 0) {
+
+  cat(
+    "\nNOT:", nrow(gecersiz_rezidu),
+    "hasta geçersiz rezidü kodu nedeniyle analiz dışı bırakıldı.\n"
+  )
+
+}
+
+cat("\nDosyalar şuraya kaydedildi:\n")
+cat(cikti_klasoru, "\n")
+
+cat("\nOluşturulan dosyalar:\n")
+cat("- Tablo_4_LEEP_hacim_rezidu.html\n")
+cat("- Tablo_4_LEEP_hacim_rezidu.docx\n")
+cat("- LEEP_hacim_rezidu_analizi.xlsx\n")
+cat("- LEEP_hacim_rezidu_boxplot.png\n")
+cat("- LEEP_hacim_histogram.png\n")
+cat("- LEEP_hacim_QQ.png\n")
