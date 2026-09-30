@@ -1,0 +1,1730 @@
+# =====================================================================
+# =====================================================================
+#
+#                   LEEP ÇALIŞMASI
+#
+#        RE-LEEP GRUBUNDA REZİDÜ HASTALIK ANALİZİ
+#                   DEMOGRAFİK TABLE 1
+#
+# =====================================================================
+# =====================================================================
+#
+# DOSYA:
+#
+# veri_toplama.xlsx
+#
+#
+# ANA SONUÇ DEĞİŞKENİ:
+#
+# Re-eksizyon_Final_Patoloji-Rezidü
+#
+# Kod kitabına göre:
+#
+# 0 = Rezidü yok  -> Rezidü negatif
+# 1 = Rezidü var  -> Rezidü pozitif
+#
+#
+# AMAÇ:
+#
+# Re-LEEP / re-konizasyon sonrası rezidü hastalık saptanan ve
+# saptanmayan hastaların demografik özelliklerini karşılaştırmak.
+#
+#
+# TABLE:
+#
+#                         Rezidü (-)       Rezidü (+)        p
+#
+# Yaş                     mean ± SD        mean ± SD
+# BMI                     mean ± SD        mean ± SD
+# Gravida                 median (IQR)     median (IQR)
+# Parite                  median (IQR)     median (IQR)
+# Abortus                 median (IQR)     median (IQR)
+# NSD                     median (IQR)     median (IQR)
+# C/S                     median (IQR)     median (IQR)
+# Menopoz                 n (%)            n (%)
+# Sigara                  n (%)            n (%)
+#
+#
+# TESTLER:
+#
+# Yaş, BMI:
+#   Welch bağımsız örneklem t-testi
+#
+# Gravida, Parite, Abortus, NSD, C/S:
+#   Mann-Whitney U / Wilcoxon rank-sum
+#
+# Menopoz, Sigara:
+#   Fisher exact test
+#
+# =====================================================================
+
+
+
+# =====================================================================
+# 1. R ORTAMINI TEMİZLE
+# =====================================================================
+
+rm(list = ls())
+
+graphics.off()
+
+
+
+# =====================================================================
+# 2. GEREKLİ PAKETLER
+# =====================================================================
+
+gerekli_paketler <- c(
+    "readxl",
+    "dplyr",
+    "gtsummary",
+    "gt",
+    "writexl",
+    "flextable",
+    "officer"
+)
+
+
+for (p in gerekli_paketler) {
+    
+    if (!requireNamespace(p, quietly = TRUE)) {
+        
+        install.packages(
+            p,
+            dependencies = TRUE
+        )
+        
+    }
+    
+}
+
+
+library(readxl)
+library(dplyr)
+library(gtsummary)
+library(gt)
+library(writexl)
+library(flextable)
+library(officer)
+
+
+
+# =====================================================================
+# 3. DOSYA YOLU
+# =====================================================================
+
+ana_klasor <-
+    "/Users/abdullah/Desktop/ablam tez"
+
+
+veri_yolu <- file.path(
+    ana_klasor,
+    "veri_toplama.xlsx"
+)
+
+
+
+# =====================================================================
+# 4. DOSYA VAR MI?
+# =====================================================================
+
+if (!file.exists(veri_yolu)) {
+    
+    stop(
+        "Dosya bulunamadı:\n",
+        veri_yolu
+    )
+    
+}
+
+
+
+# =====================================================================
+# 5. EXCEL DOSYASINI OKU
+# =====================================================================
+#
+# veri_toplama.xlsx yapısı:
+#
+# Satır 1 = form başlığı
+# Satır 2 = boş
+# Satır 3 = grup başlıkları
+# Satır 4 = gerçek değişken isimleri
+#
+# Bu nedenle:
+#
+# skip = 3
+#
+# =====================================================================
+
+raw <- readxl::read_excel(
+    
+    path =
+        veri_yolu,
+    
+    sheet =
+        "Veri Toplama Formu",
+    
+    skip =
+        3
+    
+)
+
+
+
+# =====================================================================
+# 6. HAM VERİ BOYUTUNU KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("HAM VERİ\n")
+cat("============================================================\n\n")
+
+
+cat(
+    "Satır sayısı:",
+    nrow(raw),
+    "\n"
+)
+
+
+cat(
+    "Sütun sayısı:",
+    ncol(raw),
+    "\n\n"
+)
+
+
+
+# =====================================================================
+# 7. SÜTUN SAYISI KONTROLÜ
+# =====================================================================
+#
+# Bu dosyada 42 sütun bekleniyor.
+#
+# =====================================================================
+
+BEKLENEN_SUTUN <- 42
+
+
+if (ncol(raw) != BEKLENEN_SUTUN) {
+    
+    cat("\nMevcut sütun isimleri:\n\n")
+    
+    print(
+        names(raw)
+    )
+    
+    
+    stop(
+        "\nHATA:\n",
+        "veri_toplama.xlsx dosyasında ",
+        BEKLENEN_SUTUN,
+        " sütun bekleniyordu fakat ",
+        ncol(raw),
+        " sütun bulundu.\n",
+        "Dosya yapısı değişmiş olabilir."
+    )
+    
+}
+
+
+
+# =====================================================================
+# 8. İHTİYAÇ DUYULAN DEĞİŞKENLERİ AL
+# =====================================================================
+#
+# Dosyadaki pozisyonlar:
+#
+# 1  = Hasta No
+# 2  = Yaş
+# 3  = BMI
+# 4  = Gravida
+# 5  = Parite
+# 6  = Abortus
+# 7  = NSD
+# 8  = CS
+# 9  = Menopoz
+#
+# 25 = Re-eksizyon yöntemi
+#
+# 33 = Re-eksizyon_Final_Patoloji-Rezidü
+#
+# 39 = Sigara
+# 40 = Paket/yıl
+# 41 = Notlar
+#
+# =====================================================================
+
+analiz <- raw %>%
+    
+    transmute(
+        
+        hasta_no =
+            as.character(.[[1]]),
+        
+        yas =
+            .[[2]],
+        
+        bmi =
+            .[[3]],
+        
+        gravida =
+            .[[4]],
+        
+        parite =
+            .[[5]],
+        
+        abortus =
+            .[[6]],
+        
+        nsd =
+            .[[7]],
+        
+        cs =
+            .[[8]],
+        
+        menopoz =
+            .[[9]],
+        
+        reeksizyon_yontemi =
+            .[[25]],
+        
+        rezidu =
+            .[[33]],
+        
+        sigara =
+            .[[39]],
+        
+        paket_yil =
+            .[[40]],
+        
+        notlar =
+            as.character(.[[41]])
+        
+    )
+
+
+
+# =====================================================================
+# 9. HASTA NUMARASINI TEMİZLE
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        hasta_no =
+            trimws(hasta_no)
+        
+    )
+
+
+
+# =====================================================================
+# 10. BOŞ SATIRLARI ÇIKAR
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    filter(
+        
+        !is.na(hasta_no),
+        
+        hasta_no != ""
+        
+    )
+
+
+
+# =====================================================================
+# 11. ÖRNEK SATIRI ÇIKAR
+# =====================================================================
+#
+# Dosyada:
+#
+# ÖRNEK-001
+#
+# isimli örnek kayıt bulunuyor.
+#
+# Bu gerçek hasta değildir.
+#
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    filter(
+        
+        !grepl(
+            
+            "^ÖRNEK",
+            
+            hasta_no,
+            
+            ignore.case = TRUE
+            
+        )
+        
+    )
+
+
+
+# =====================================================================
+# 12. SAYISAL DÖNÜŞÜM FONKSİYONU
+# =====================================================================
+
+sayisal_yap <- function(x) {
+    
+    suppressWarnings(
+        
+        as.numeric(
+            as.character(x)
+        )
+        
+    )
+    
+}
+
+
+
+# =====================================================================
+# 13. DEĞİŞKENLERİ SAYISAL YAP
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        yas =
+            sayisal_yap(yas),
+        
+        bmi =
+            sayisal_yap(bmi),
+        
+        gravida =
+            sayisal_yap(gravida),
+        
+        parite =
+            sayisal_yap(parite),
+        
+        abortus =
+            sayisal_yap(abortus),
+        
+        nsd =
+            sayisal_yap(nsd),
+        
+        cs =
+            sayisal_yap(cs),
+        
+        menopoz =
+            sayisal_yap(menopoz),
+        
+        reeksizyon_yontemi =
+            sayisal_yap(reeksizyon_yontemi),
+        
+        rezidu =
+            sayisal_yap(rezidu),
+        
+        sigara =
+            sayisal_yap(sigara),
+        
+        paket_yil =
+            sayisal_yap(paket_yil)
+        
+    )
+
+
+
+# =====================================================================
+# 14. RE-EKSİZYON YÖNTEMİNİ KONTROL ET
+# =====================================================================
+#
+# Kod kitabına göre:
+#
+# 0 = Re-LEEP
+# 1 = Re-konizasyon
+# 2 = Histerektomi
+#
+# Bu dosya re-LEEP/re-konizasyon kohortu olarak kullanılacağı için
+# burada dağılımı mutlaka kontrol ediyoruz.
+#
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("RE-EKSİZYON YÖNTEMİ\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        analiz$reeksizyon_yontemi,
+        useNA = "ifany"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 15. HİSTEREKTOMİ KODLU KAYIT VARSA UYAR
+# =====================================================================
+
+histerektomi_kaydi <- analiz %>%
+    
+    filter(
+        reeksizyon_yontemi == 2
+    ) %>%
+    
+    select(
+        hasta_no,
+        reeksizyon_yontemi,
+        rezidu,
+        notlar
+    )
+
+
+
+if (nrow(histerektomi_kaydi) > 0) {
+    
+    cat("\n")
+    cat("============================================================\n")
+    cat("UYARI: HİSTEREKTOMİ KODLU KAYITLAR\n")
+    cat("============================================================\n\n")
+    
+    print(
+        histerektomi_kaydi
+    )
+    
+    cat(
+        "\nBu hastalar aşağıdaki re-LEEP/re-konizasyon ",
+        "analizine dahil edilmeyecektir.\n"
+    )
+    
+}
+
+
+
+# =====================================================================
+# 16. SADECE RE-LEEP / RE-KONİZASYON HASTALARINI AL
+# =====================================================================
+#
+# 0 = Re-LEEP
+# 1 = Re-konizasyon
+#
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    filter(
+        reeksizyon_yontemi %in% c(0, 1)
+    )
+
+
+
+# =====================================================================
+# 17. REZİDÜ HAM DEĞERLERİNİ KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("RE-EKSİZYON FİNAL PATOLOJİ - REZİDÜ HAM KODLARI\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        analiz$rezidu,
+        useNA = "ifany"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 18. GEÇERSİZ REZİDÜ KODLARINI BUL
+# =====================================================================
+#
+# Kod kitabına göre:
+#
+# 0 = Yok
+# 1 = Var
+#
+# Bunun dışındaki kodlar otomatik olarak analiz edilmez.
+#
+# =====================================================================
+
+gecersiz_rezidu <- analiz %>%
+    
+    filter(
+        
+        !is.na(rezidu),
+        
+        !(rezidu %in% c(0, 1))
+        
+    ) %>%
+    
+    select(
+        hasta_no,
+        rezidu,
+        notlar
+    )
+
+
+
+cat("\n")
+cat("============================================================\n")
+cat("GEÇERSİZ REZİDÜ KODU KONTROLÜ\n")
+cat("============================================================\n\n")
+
+
+if (nrow(gecersiz_rezidu) == 0) {
+    
+    cat(
+        "0/1 dışında rezidü kodu bulunmadı.\n"
+    )
+    
+} else {
+    
+    print(
+        gecersiz_rezidu
+    )
+    
+}
+
+
+
+# =====================================================================
+# 19. REZİDÜ GRUBUNU OLUŞTUR
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        rezidu_grup = case_when(
+            
+            rezidu == 0 ~
+                "Rezidü negatif",
+            
+            rezidu == 1 ~
+                "Rezidü pozitif",
+            
+            TRUE ~
+                NA_character_
+            
+        )
+        
+    )
+
+
+
+analiz$rezidu_grup <- factor(
+    
+    analiz$rezidu_grup,
+    
+    levels = c(
+        "Rezidü negatif",
+        "Rezidü pozitif"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 20. SADECE FİNAL PATOLOJİ SONUCU NET HASTALAR
+# =====================================================================
+
+demografi <- analiz %>%
+    
+    filter(
+        !is.na(rezidu_grup)
+    )
+
+
+
+# =====================================================================
+# 21. REZİDÜ GRUP SAYILARI
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("REZİDÜ GRUPLARI\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        demografi$rezidu_grup
+    )
+    
+)
+
+
+cat(
+    "\nToplam analize giren hasta:",
+    nrow(demografi),
+    "\n"
+)
+
+
+
+# =====================================================================
+# 22. MENOPOZ KODUNU KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("MENOPOZ HAM KODLARI\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        demografi$menopoz,
+        demografi$rezidu_grup,
+        useNA = "ifany"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 23. MENOPOZ FACTOR
+# =====================================================================
+#
+# Kod kitabına göre:
+#
+# 0 = Premenopozal
+# 1 = Postmenopozal
+#
+# =====================================================================
+
+demografi <- demografi %>%
+    
+    mutate(
+        
+        menopoz_grup = case_when(
+            
+            menopoz == 0 ~
+                "Premenopoz",
+            
+            menopoz == 1 ~
+                "Postmenopoz",
+            
+            TRUE ~
+                NA_character_
+            
+        )
+        
+    )
+
+
+
+demografi$menopoz_grup <- factor(
+    
+    demografi$menopoz_grup,
+    
+    levels = c(
+        "Premenopoz",
+        "Postmenopoz"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 24. SİGARA KODUNU KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("SİGARA HAM KODLARI\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        demografi$sigara,
+        demografi$rezidu_grup,
+        useNA = "ifany"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 25. SİGARA FACTOR
+# =====================================================================
+#
+# Kod kitabına göre:
+#
+# 0 = Yok
+# 1 = Var
+#
+# =====================================================================
+
+demografi <- demografi %>%
+    
+    mutate(
+        
+        sigara_grup = case_when(
+            
+            sigara == 0 ~
+                "Hayır",
+            
+            sigara == 1 ~
+                "Evet",
+            
+            TRUE ~
+                NA_character_
+            
+        )
+        
+    )
+
+
+
+demografi$sigara_grup <- factor(
+    
+    demografi$sigara_grup,
+    
+    levels = c(
+        "Hayır",
+        "Evet"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 26. SİGARA VE MENOPOZ DAĞILIMINI GÖSTER
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("MENOPOZ x REZİDÜ\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        demografi$menopoz_grup,
+        demografi$rezidu_grup,
+        useNA = "ifany"
+    )
+    
+)
+
+
+
+cat("\n")
+cat("============================================================\n")
+cat("SİGARA x REZİDÜ\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    table(
+        demografi$sigara_grup,
+        demografi$rezidu_grup,
+        useNA = "ifany"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 27. EKSİK VERİ TABLOSU
+# =====================================================================
+
+eksik_veri <- data.frame(
+    
+    Degisken = c(
+        "Yaş",
+        "BMI",
+        "Gravida",
+        "Parite",
+        "Abortus",
+        "NSD",
+        "C/S",
+        "Menopoz",
+        "Sigara"
+    ),
+    
+    
+    Eksik_n = c(
+        
+        sum(is.na(demografi$yas)),
+        
+        sum(is.na(demografi$bmi)),
+        
+        sum(is.na(demografi$gravida)),
+        
+        sum(is.na(demografi$parite)),
+        
+        sum(is.na(demografi$abortus)),
+        
+        sum(is.na(demografi$nsd)),
+        
+        sum(is.na(demografi$cs)),
+        
+        sum(is.na(demografi$menopoz_grup)),
+        
+        sum(is.na(demografi$sigara_grup))
+        
+    )
+    
+)
+
+
+
+eksik_veri <- eksik_veri %>%
+    
+    mutate(
+        
+        Eksik_yuzde =
+            round(
+                100 * Eksik_n / nrow(demografi),
+                1
+            )
+        
+    )
+
+
+
+cat("\n")
+cat("============================================================\n")
+cat("EKSİK VERİ ÖZETİ\n")
+cat("============================================================\n\n")
+
+
+print(
+    eksik_veri
+)
+
+
+
+# =====================================================================
+# 28. GÜVENLİ SHAPIRO FONKSİYONU
+# =====================================================================
+
+guvenli_shapiro <- function(x) {
+    
+    x <- x[
+        !is.na(x)
+    ]
+    
+    
+    if (
+        length(x) < 3 ||
+        length(x) > 5000
+    ) {
+        
+        return(
+            NA_real_
+        )
+        
+    }
+    
+    
+    if (
+        length(unique(x)) < 2
+    ) {
+        
+        return(
+            NA_real_
+        )
+        
+    }
+    
+    
+    sonuc <- tryCatch(
+        
+        shapiro.test(x),
+        
+        error = function(e) NULL
+        
+    )
+    
+    
+    if (is.null(sonuc)) {
+        
+        return(
+            NA_real_
+        )
+        
+    }
+    
+    
+    sonuc$p.value
+    
+}
+
+
+
+# =====================================================================
+# 29. NORMALİTE KONTROLÜ
+# =====================================================================
+
+normalite <- demografi %>%
+    
+    group_by(
+        rezidu_grup
+    ) %>%
+    
+    summarise(
+        
+        Yas_N =
+            sum(!is.na(yas)),
+        
+        Yas_Shapiro_p =
+            guvenli_shapiro(yas),
+        
+        BMI_N =
+            sum(!is.na(bmi)),
+        
+        BMI_Shapiro_p =
+            guvenli_shapiro(bmi),
+        
+        .groups =
+            "drop"
+        
+    )
+
+
+
+cat("\n")
+cat("============================================================\n")
+cat("NORMALİTE KONTROLÜ\n")
+cat("============================================================\n\n")
+
+
+print(
+    as.data.frame(normalite)
+)
+
+
+
+# =====================================================================
+# 30. TABLE 1
+# =====================================================================
+
+table1 <- demografi %>%
+    
+    select(
+        
+        rezidu_grup,
+        
+        yas,
+        
+        bmi,
+        
+        gravida,
+        
+        parite,
+        
+        abortus,
+        
+        nsd,
+        
+        cs,
+        
+        menopoz_grup,
+        
+        sigara_grup
+        
+    ) %>%
+    
+    tbl_summary(
+        
+        by =
+            rezidu_grup,
+        
+        
+        type = list(
+            
+            yas ~
+                "continuous",
+            
+            bmi ~
+                "continuous",
+            
+            gravida ~
+                "continuous",
+            
+            parite ~
+                "continuous",
+            
+            abortus ~
+                "continuous",
+            
+            nsd ~
+                "continuous",
+            
+            cs ~
+                "continuous",
+            
+            menopoz_grup ~
+                "categorical",
+            
+            sigara_grup ~
+                "categorical"
+            
+        ),
+        
+        
+        missing =
+            "no",
+        
+        
+        statistic = list(
+            
+            c(
+                yas,
+                bmi
+            ) ~
+                "{mean} ± {sd}",
+            
+            
+            c(
+                gravida,
+                parite,
+                abortus,
+                nsd,
+                cs
+            ) ~
+                "{median} ({p25}–{p75})",
+            
+            
+            all_categorical() ~
+                "{n} ({p}%)"
+            
+        ),
+        
+        
+        digits = list(
+            
+            c(
+                yas,
+                bmi
+            ) ~
+                1,
+            
+            
+            c(
+                gravida,
+                parite,
+                abortus,
+                nsd,
+                cs
+            ) ~
+                1,
+            
+            
+            all_categorical() ~
+                c(0, 1)
+            
+        ),
+        
+        
+        label = list(
+            
+            yas ~
+                "Yaş, yıl",
+            
+            bmi ~
+                "BMI, kg/m²",
+            
+            gravida ~
+                "Gravida",
+            
+            parite ~
+                "Parite",
+            
+            abortus ~
+                "Abortus",
+            
+            nsd ~
+                "NSD sayısı",
+            
+            cs ~
+                "C/S sayısı",
+            
+            menopoz_grup ~
+                "Menopoz durumu",
+            
+            sigara_grup ~
+                "Sigara kullanımı"
+            
+        )
+        
+    )
+
+
+
+# =====================================================================
+# 31. p DEĞERLERİNİ EKLE
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    add_p(
+        
+        test = list(
+            
+            c(
+                yas,
+                bmi
+            ) ~
+                "t.test",
+            
+            
+            c(
+                gravida,
+                parite,
+                abortus,
+                nsd,
+                cs
+            ) ~
+                "wilcox.test",
+            
+            
+            c(
+                menopoz_grup,
+                sigara_grup
+            ) ~
+                "fisher.test"
+            
+        ),
+        
+        
+        pvalue_fun = function(x) {
+            
+            style_pvalue(
+                x,
+                digits = 3
+            )
+            
+        }
+        
+    )
+
+
+
+# =====================================================================
+# 32. DEĞİŞKEN İSİMLERİNİ KALIN YAP
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    bold_labels()
+
+
+
+# =====================================================================
+# 33. SÜTUN BAŞLIKLARINI DİNAMİK YAP
+# =====================================================================
+#
+# Hasta sayıları elle yazılmıyor.
+#
+# {level}
+# {n}
+#
+# otomatik olarak hesaplanıyor.
+#
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    modify_header(
+        
+        label ~
+            "**Özellik**",
+        
+        all_stat_cols() ~
+            "**{level}**, N = {n}",
+        
+        p.value ~
+            "**p değeri**"
+        
+    ) %>%
+    
+    modify_footnote(
+        
+        all_stat_cols() ~
+            NA
+        
+    )
+
+
+
+# =====================================================================
+# 34. TABLO BAŞLIĞI
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    modify_caption(
+        
+        paste0(
+            
+            "**Tablo. Re-LEEP/re-konizasyon sonrası rezidü ",
+            "hastalık durumuna göre demografik özellikler**"
+            
+        )
+        
+    )
+
+
+
+# =====================================================================
+# 35. TABLOYU EKRANDA GÖSTER
+# =====================================================================
+
+table1
+
+
+
+# =====================================================================
+# 36. TABLONUN İÇ VERİSİNİ GÖSTER
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("TABLE 1 İÇ VERİSİ\n")
+cat("============================================================\n\n")
+
+
+print(
+    
+    as.data.frame(
+        table1$table_body
+    )
+    
+)
+
+
+
+# =====================================================================
+# 37. SİGARA İÇİN AYRI 2x2 TABLO
+# =====================================================================
+#
+# Ana araştırma sorularından biri sigara olduğu için
+# ham sayı ve yüzdeleri ayrıca gösteriyoruz.
+#
+# =====================================================================
+
+sigara_tablo <- table(
+    
+    demografi$sigara_grup,
+    
+    demografi$rezidu_grup,
+    
+    useNA = "no"
+    
+)
+
+
+
+cat("\n")
+cat("============================================================\n")
+cat("SİGARA x REZİDÜ - SAYILAR\n")
+cat("============================================================\n\n")
+
+
+print(
+    sigara_tablo
+)
+
+
+
+cat("\n")
+cat("============================================================\n")
+cat("SİGARA x REZİDÜ - GRUP İÇİ YÜZDELER\n")
+cat("============================================================\n\n")
+
+
+if (
+    nrow(sigara_tablo) > 0 &&
+    ncol(sigara_tablo) > 0
+) {
+    
+    print(
+        
+        round(
+            
+            prop.table(
+                sigara_tablo,
+                margin = 2
+            ) * 100,
+            
+            1
+            
+        )
+        
+    )
+    
+}
+
+
+
+# =====================================================================
+# 38. SİGARA İÇİN FISHER EXACT TEST
+# =====================================================================
+
+if (
+    all(dim(sigara_tablo) == c(2, 2))
+) {
+    
+    fisher_sigara <- fisher.test(
+        sigara_tablo
+    )
+    
+    
+    cat("\n")
+    cat("============================================================\n")
+    cat("SİGARA - FISHER EXACT TEST\n")
+    cat("============================================================\n\n")
+    
+    
+    print(
+        fisher_sigara
+    )
+    
+} else {
+    
+    fisher_sigara <- NULL
+    
+    
+    cat(
+        "\nSigara için 2x2 tablo oluşmadığı için ",
+        "Fisher exact test hesaplanamadı.\n"
+    )
+    
+}
+
+
+
+# =====================================================================
+# 39. ÇIKTI DOSYA YOLLARI
+# =====================================================================
+
+html_yolu <- file.path(
+    
+    ana_klasor,
+    
+    "ReLEEP_Rezidu_Demografik_Table1.html"
+    
+)
+
+
+word_yolu <- file.path(
+    
+    ana_klasor,
+    
+    "ReLEEP_Rezidu_Demografik_Table1.docx"
+    
+)
+
+
+kontrol_excel_yolu <- file.path(
+    
+    ana_klasor,
+    
+    "ReLEEP_Rezidu_Demografik_Kontrol.xlsx"
+    
+)
+
+
+temiz_veri_yolu <- file.path(
+    
+    ana_klasor,
+    
+    "ReLEEP_Rezidu_Analiz_Verisi.xlsx"
+    
+)
+
+
+
+# =====================================================================
+# 40. HTML KAYDET
+# =====================================================================
+
+table1_gt <- gtsummary::as_gt(
+    table1
+)
+
+
+gt::gtsave(
+    
+    table1_gt,
+    
+    filename =
+        html_yolu
+    
+)
+
+
+
+# =====================================================================
+# 41. WORD KAYDET
+# =====================================================================
+
+table1_word <- gtsummary::as_flex_table(
+    table1
+)
+
+
+flextable::save_as_docx(
+    
+    "Rezidü Demografik Analizi" =
+        table1_word,
+    
+    path =
+        word_yolu
+    
+)
+
+
+
+# =====================================================================
+# 42. KONTROL SONUÇLARINI EXCEL'E KAYDET
+# =====================================================================
+
+sigara_sayi_df <- as.data.frame.matrix(
+    sigara_tablo
+)
+
+
+sigara_sayi_df <- cbind(
+    
+    Sigara =
+        rownames(sigara_sayi_df),
+    
+    sigara_sayi_df
+    
+)
+
+
+rownames(sigara_sayi_df) <- NULL
+
+
+
+if (
+    nrow(sigara_tablo) > 0 &&
+    ncol(sigara_tablo) > 0
+) {
+    
+    sigara_yuzde_df <- as.data.frame.matrix(
+        
+        round(
+            
+            prop.table(
+                sigara_tablo,
+                margin = 2
+            ) * 100,
+            
+            1
+            
+        )
+        
+    )
+    
+    
+    sigara_yuzde_df <- cbind(
+        
+        Sigara =
+            rownames(sigara_yuzde_df),
+        
+        sigara_yuzde_df
+        
+    )
+    
+    
+    rownames(sigara_yuzde_df) <- NULL
+    
+} else {
+    
+    sigara_yuzde_df <- data.frame()
+    
+}
+
+
+
+writexl::write_xlsx(
+    
+    list(
+        
+        "Eksik_Veri" =
+            eksik_veri,
+        
+        "Normalite" =
+            as.data.frame(normalite),
+        
+        "Gecersiz_Rezidu" =
+            as.data.frame(gecersiz_rezidu),
+        
+        "Sigara_Sayilar" =
+            sigara_sayi_df,
+        
+        "Sigara_Yuzdeler" =
+            sigara_yuzde_df
+        
+    ),
+    
+    path =
+        kontrol_excel_yolu
+    
+)
+
+
+
+# =====================================================================
+# 43. TEMİZ ANALİZ VERİSİNİ KAYDET
+# =====================================================================
+
+writexl::write_xlsx(
+    
+    as.data.frame(demografi),
+    
+    path =
+        temiz_veri_yolu
+    
+)
+
+
+
+# =====================================================================
+# 44. SON KONTROL
+# =====================================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("RE-LEEP REZİDÜ DEMOGRAFİK ANALİZİ TAMAMLANDI\n")
+cat("============================================================\n\n")
+
+
+cat(
+    "Rezidü negatif N =",
+    sum(
+        demografi$rezidu == 0,
+        na.rm = TRUE
+    ),
+    "\n"
+)
+
+
+cat(
+    "Rezidü pozitif N =",
+    sum(
+        demografi$rezidu == 1,
+        na.rm = TRUE
+    ),
+    "\n"
+)
+
+
+cat(
+    "Toplam analiz N =",
+    nrow(demografi),
+    "\n\n"
+)
+
+
+
+# =====================================================================
+# 45. DOSYALAR OLUŞTU MU?
+# =====================================================================
+
+cat(
+    "Word:",
+    file.exists(word_yolu),
+    "\n"
+)
+
+
+cat(
+    "HTML:",
+    file.exists(html_yolu),
+    "\n"
+)
+
+
+cat(
+    "Kontrol Excel:",
+    file.exists(kontrol_excel_yolu),
+    "\n"
+)
+
+
+cat(
+    "Temiz analiz verisi:",
+    file.exists(temiz_veri_yolu),
+    "\n\n"
+)
+
+
+
+# =====================================================================
+# 46. DOSYA YOLLARI
+# =====================================================================
+
+cat(
+    "WORD:\n",
+    word_yolu,
+    "\n\n"
+)
+
+
+cat(
+    "HTML:\n",
+    html_yolu,
+    "\n\n"
+)
+
+
+cat(
+    "KONTROL EXCEL:\n",
+    kontrol_excel_yolu,
+    "\n\n"
+)
+
+
+cat(
+    "TEMİZ ANALİZ VERİSİ:\n",
+    temiz_veri_yolu,
+    "\n\n"
+)
+
+
+
+# =====================================================================
+# 47. SESSION INFO
+# =====================================================================
+
+sessionInfo()
+
+
+
+# =====================================================================
+# =====================================================================
+#
+#                       ANALİZ BİTTİ
+#
+# =====================================================================
+# =====================================================================
