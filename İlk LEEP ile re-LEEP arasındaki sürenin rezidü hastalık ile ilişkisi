@@ -1,0 +1,1226 @@
+# ======================================================================
+# ======================================================================
+#
+#               İLK LEEP - RE-LEEP SÜRESİ
+#                  REZİDÜ HASTALIK ANALİZİ
+#
+# ======================================================================
+# ======================================================================
+#
+# DOSYA:
+# /Users/abdullah/Desktop/ablam tez/veri_toplama.xlsx
+#
+# OUTCOME:
+# Re-eksizyon_Final_Patoloji-Rezidü
+#
+# 0 = Rezidü negatif
+# 1 = Rezidü pozitif
+#
+# ANALİZ:
+# 1. İlk LEEP -> re-LEEP süresi takvim ayı olarak hesaplanır.
+# 2. Rezidü (-) ve (+) gruplarında medyan (IQR) hesaplanır.
+# 3. Gruplar Mann-Whitney U testi ile karşılaştırılır.
+# 4. Tek değişkenli lojistik regresyon uygulanır.
+# 5. Her 1 aylık artış için OR ve %95 GA hesaplanır.
+# 6. RStudio Viewer'da yayınlanabilir tablo oluşturulur.
+# 7. Word ve Excel çıktısı oluşturulur.
+#
+# ======================================================================
+
+
+# ======================================================================
+# 1. ORTAMI TEMİZLE
+# ======================================================================
+
+rm(list = ls())
+graphics.off()
+
+
+# ======================================================================
+# 2. PAKETLER
+# ======================================================================
+
+paketler <- c(
+  "readxl",
+  "dplyr",
+  "gt",
+  "writexl",
+  "flextable",
+  "officer"
+)
+
+for (p in paketler) {
+  
+  if (!requireNamespace(p, quietly = TRUE)) {
+    install.packages(p, dependencies = TRUE)
+  }
+  
+}
+
+library(readxl)
+library(dplyr)
+library(gt)
+library(writexl)
+library(flextable)
+library(officer)
+
+
+# ======================================================================
+# 3. DOSYA YOLU
+# ======================================================================
+
+ana_klasor <- "/Users/abdullah/Desktop/ablam tez"
+
+veri_yolu <- file.path(
+  ana_klasor,
+  "veri_toplama.xlsx"
+)
+
+if (!file.exists(veri_yolu)) {
+  stop("Dosya bulunamadı: ", veri_yolu)
+}
+
+
+# ======================================================================
+# 4. EXCEL'İ OKU
+# ======================================================================
+
+raw <- read_excel(
+  path = veri_yolu,
+  sheet = "Veri Toplama Formu",
+  skip = 3
+)
+
+cat("\nHam veri:", nrow(raw), "satır x", ncol(raw), "sütun\n")
+
+
+# ======================================================================
+# 5. GEREKLİ SÜTUNLARI AL
+# ======================================================================
+#
+# 1  = Hasta No
+# 11 = İlk LEEP tarihi
+# 25 = Re-eksizyon yöntemi
+# 26 = Re-eksizyon tarihi
+# 33 = Re-eksizyon final patoloji - rezidü
+# 41 = Notlar
+#
+# ======================================================================
+
+veri <- raw %>%
+  transmute(
+    hasta_no = as.character(.[[1]]),
+    ilk_leep_ham = .[[11]],
+    reeksizyon_yontemi = .[[25]],
+    reeksizyon_ham = .[[26]],
+    rezidu = .[[33]],
+    notlar = as.character(.[[41]])
+  )
+
+
+# ======================================================================
+# 6. ÖRNEK VE BOŞ SATIRLARI ÇIKAR
+# ======================================================================
+
+veri <- veri %>%
+  mutate(
+    hasta_no = trimws(hasta_no)
+  ) %>%
+  filter(
+    !is.na(hasta_no),
+    hasta_no != "",
+    !grepl("^ÖRNEK", hasta_no, ignore.case = TRUE)
+  )
+
+
+# ======================================================================
+# 7. SAYISAL DÖNÜŞÜM
+# ======================================================================
+
+sayisal_yap <- function(x) {
+  suppressWarnings(as.numeric(as.character(x)))
+}
+
+veri <- veri %>%
+  mutate(
+    reeksizyon_yontemi = sayisal_yap(reeksizyon_yontemi),
+    rezidu = sayisal_yap(rezidu)
+  )
+
+
+# ======================================================================
+# 8. GÜVENLİ TARİH FONKSİYONU
+# ======================================================================
+#
+# charToDate hatası vermeyecek şekilde hazırlanmıştır.
+#
+# ======================================================================
+
+guvenli_tarih <- function(x) {
+  
+  # Zaten Date ise
+  if (inherits(x, "Date")) {
+    return(x)
+  }
+  
+  # POSIX ise
+  if (inherits(x, "POSIXt")) {
+    return(as.Date(x))
+  }
+  
+  # Numeric Excel seri numarası ise
+  if (is.numeric(x)) {
+    
+    sonuc <- rep(as.Date(NA), length(x))
+    
+    uygun <- !is.na(x)
+    
+    sonuc[uygun] <- as.Date(
+      x[uygun],
+      origin = "1899-12-30"
+    )
+    
+    return(sonuc)
+  }
+  
+  # Character
+  x_chr <- trimws(as.character(x))
+  
+  x_chr[
+    x_chr %in% c(
+      "",
+      "NA",
+      "N/A",
+      "-",
+      "."
+    )
+  ] <- NA_character_
+  
+  sonuc <- rep(as.Date(NA), length(x_chr))
+  
+  
+  # --------------------------------------------------------------
+  # Character biçiminde Excel seri numarası olabilir
+  # --------------------------------------------------------------
+  
+  x_num <- suppressWarnings(as.numeric(x_chr))
+  
+  seri <- !is.na(x_num) &
+    x_num > 1000 &
+    x_num < 100000
+  
+  if (any(seri)) {
+    
+    sonuc[seri] <- as.Date(
+      x_num[seri],
+      origin = "1899-12-30"
+    )
+    
+  }
+  
+  
+  # --------------------------------------------------------------
+  # Tarih formatlarını sırayla dene
+  # --------------------------------------------------------------
+  
+  formatlar <- c(
+    "%Y-%m-%d",
+    "%Y/%m/%d",
+    "%Y.%m.%d",
+    "%d.%m.%Y",
+    "%d/%m/%Y",
+    "%d-%m-%Y",
+    "%d.%m.%y",
+    "%d/%m/%y",
+    "%d-%m-%y"
+  )
+  
+  for (fmt in formatlar) {
+    
+    idx <- is.na(sonuc) & !is.na(x_chr)
+    
+    if (!any(idx)) break
+    
+    gecici <- suppressWarnings(
+      as.Date(
+        x_chr[idx],
+        format = fmt
+      )
+    )
+    
+    sonuc[idx] <- gecici
+  }
+  
+  
+  # --------------------------------------------------------------
+  # Saat içeren kayıt varsa ilk 10 karakteri dene
+  # --------------------------------------------------------------
+  
+  for (fmt in c(
+    "%Y-%m-%d",
+    "%d.%m.%Y",
+    "%d/%m/%Y",
+    "%d-%m-%Y"
+  )) {
+    
+    idx <- is.na(sonuc) & !is.na(x_chr)
+    
+    if (!any(idx)) break
+    
+    kisa <- substr(
+      x_chr[idx],
+      1,
+      10
+    )
+    
+    gecici <- suppressWarnings(
+      as.Date(
+        kisa,
+        format = fmt
+      )
+    )
+    
+    sonuc[idx] <- gecici
+  }
+  
+  return(sonuc)
+}
+
+
+# ======================================================================
+# 9. TARİHLERİ DÖNÜŞTÜR
+# ======================================================================
+
+veri$ilk_leep_tarihi <- guvenli_tarih(
+  veri$ilk_leep_ham
+)
+
+veri$reeksizyon_tarihi <- guvenli_tarih(
+  veri$reeksizyon_ham
+)
+
+
+# ======================================================================
+# 10. TARİH KONTROLÜ
+# ======================================================================
+
+cat("\n============================================================\n")
+cat("TARİH KONTROLÜ\n")
+cat("============================================================\n")
+
+cat(
+  "İlk LEEP tarihi okunamayan:",
+  sum(is.na(veri$ilk_leep_tarihi)),
+  "\n"
+)
+
+cat(
+  "Re-LEEP tarihi okunamayan:",
+  sum(is.na(veri$reeksizyon_tarihi)),
+  "\n"
+)
+
+
+# ======================================================================
+# 11. SADECE RE-LEEP / RE-KONİZASYON
+# ======================================================================
+#
+# 0 = Re-LEEP
+# 1 = Re-konizasyon
+# 2 = Histerektomi
+#
+# ======================================================================
+
+veri <- veri %>%
+  filter(
+    reeksizyon_yontemi %in% c(0, 1)
+  )
+
+
+# ======================================================================
+# 12. SADECE GEÇERLİ REZİDÜ KODLARI
+# ======================================================================
+
+cat("\nRezidü ham dağılımı:\n")
+
+print(
+  table(
+    veri$rezidu,
+    useNA = "ifany"
+  )
+)
+
+veri <- veri %>%
+  filter(
+    rezidu %in% c(0, 1)
+  )
+
+
+# ======================================================================
+# 13. REZİDÜ GRUBUNU OLUŞTUR
+# ======================================================================
+
+veri <- veri %>%
+  mutate(
+    
+    rezidu_grup = case_when(
+      rezidu == 0 ~ "Rezidü negatif",
+      rezidu == 1 ~ "Rezidü pozitif",
+      TRUE ~ NA_character_
+    )
+    
+  )
+
+veri$rezidu_grup <- factor(
+  veri$rezidu_grup,
+  levels = c(
+    "Rezidü negatif",
+    "Rezidü pozitif"
+  )
+)
+
+
+# ======================================================================
+# 14. TAKVİM AYI OLARAK SÜRE
+# ======================================================================
+#
+# Örnek:
+#
+# 01.01.2024 -> 01.04.2024 = 3 ay
+#
+# ======================================================================
+
+veri <- veri %>%
+  mutate(
+    
+    ilk_yil = as.integer(
+      format(
+        ilk_leep_tarihi,
+        "%Y"
+      )
+    ),
+    
+    ilk_ay = as.integer(
+      format(
+        ilk_leep_tarihi,
+        "%m"
+      )
+    ),
+    
+    re_yil = as.integer(
+      format(
+        reeksizyon_tarihi,
+        "%Y"
+      )
+    ),
+    
+    re_ay = as.integer(
+      format(
+        reeksizyon_tarihi,
+        "%m"
+      )
+    ),
+    
+    sure_ay =
+      (re_yil - ilk_yil) * 12 +
+      (re_ay - ilk_ay)
+    
+  )
+
+
+# ======================================================================
+# 15. NEGATİF SÜRE KONTROLÜ
+# ======================================================================
+
+negatif_sure <- veri %>%
+  filter(
+    !is.na(sure_ay),
+    sure_ay < 0
+  )
+
+if (nrow(negatif_sure) > 0) {
+  
+  cat("\nUYARI: Negatif süre bulunan hastalar:\n")
+  
+  print(
+    negatif_sure %>%
+      select(
+        hasta_no,
+        ilk_leep_tarihi,
+        reeksizyon_tarihi,
+        sure_ay
+      )
+  )
+  
+}
+
+
+# ======================================================================
+# 16. ANALİZ VERİSİNİ OLUŞTUR
+# ======================================================================
+
+analiz <- veri %>%
+  filter(
+    !is.na(sure_ay),
+    sure_ay >= 0,
+    rezidu %in% c(0, 1)
+  )
+
+
+# ======================================================================
+# 17. HASTA SAYILARI
+# ======================================================================
+
+n_toplam <- nrow(analiz)
+
+n_negatif <- sum(
+  analiz$rezidu == 0
+)
+
+n_pozitif <- sum(
+  analiz$rezidu == 1
+)
+
+
+cat("\n============================================================\n")
+cat("ANALİZ POPÜLASYONU\n")
+cat("============================================================\n")
+
+cat("Toplam N =", n_toplam, "\n")
+cat("Rezidü negatif N =", n_negatif, "\n")
+cat("Rezidü pozitif N =", n_pozitif, "\n")
+
+
+# ======================================================================
+# 18. İKİ GRUP DA MEVCUT MU?
+# ======================================================================
+
+if (
+  n_negatif == 0 ||
+  n_pozitif == 0
+) {
+  
+  stop(
+    "Rezidü negatif ve pozitif grupların ikisi de mevcut değil."
+  )
+  
+}
+
+
+# ======================================================================
+# 19. TANIMLAYICI İSTATİSTİKLER
+# ======================================================================
+
+ozet <- analiz %>%
+  group_by(
+    rezidu_grup
+  ) %>%
+  summarise(
+    
+    N = n(),
+    
+    Ortalama =
+      mean(sure_ay),
+    
+    SD =
+      sd(sure_ay),
+    
+    Medyan =
+      median(sure_ay),
+    
+    Q1 =
+      as.numeric(
+        quantile(
+          sure_ay,
+          0.25
+        )
+      ),
+    
+    Q3 =
+      as.numeric(
+        quantile(
+          sure_ay,
+          0.75
+        )
+      ),
+    
+    Minimum =
+      min(sure_ay),
+    
+    Maksimum =
+      max(sure_ay),
+    
+    .groups = "drop"
+    
+  )
+
+
+cat("\n============================================================\n")
+cat("TANIMLAYICI İSTATİSTİKLER\n")
+cat("============================================================\n")
+
+print(
+  as.data.frame(ozet)
+)
+
+
+# ======================================================================
+# 20. MANN-WHITNEY U TESTİ
+# ======================================================================
+
+mw <- wilcox.test(
+  sure_ay ~ rezidu_grup,
+  data = analiz,
+  exact = FALSE
+)
+
+p_mw <- mw$p.value
+
+
+cat("\n============================================================\n")
+cat("MANN-WHITNEY U TESTİ\n")
+cat("============================================================\n")
+
+print(mw)
+
+
+# ======================================================================
+# 21. LOJİSTİK REGRESYON
+# ======================================================================
+#
+# rezidu = 0 / 1
+#
+# Model:
+#
+# rezidu ~ sure_ay
+#
+# ======================================================================
+
+model <- glm(
+  rezidu ~ sure_ay,
+  data = analiz,
+  family = binomial(link = "logit")
+)
+
+
+cat("\n============================================================\n")
+cat("LOJİSTİK REGRESYON\n")
+cat("============================================================\n")
+
+print(
+  summary(model)
+)
+
+
+# ======================================================================
+# 22. OR, %95 GA VE p
+# ======================================================================
+
+beta <- coef(model)[["sure_ay"]]
+
+se <- sqrt(
+  vcov(model)[
+    "sure_ay",
+    "sure_ay"
+  ]
+)
+
+p_logistik <- summary(model)$coefficients[
+  "sure_ay",
+  "Pr(>|z|)"
+]
+
+
+OR_1ay <- exp(beta)
+
+Alt95_1ay <- exp(
+  beta - 1.96 * se
+)
+
+Ust95_1ay <- exp(
+  beta + 1.96 * se
+)
+
+
+# ======================================================================
+# 23. 3 AYLIK ARTIŞ İÇİN OR
+# ======================================================================
+
+OR_3ay <- exp(
+  beta * 3
+)
+
+Alt95_3ay <- exp(
+  (beta - 1.96 * se) * 3
+)
+
+Ust95_3ay <- exp(
+  (beta + 1.96 * se) * 3
+)
+
+
+# ======================================================================
+# 24. GRUP ÖZETLERİNİ AL
+# ======================================================================
+
+neg <- ozet %>%
+  filter(
+    rezidu_grup == "Rezidü negatif"
+  )
+
+poz <- ozet %>%
+  filter(
+    rezidu_grup == "Rezidü pozitif"
+  )
+
+
+# ======================================================================
+# 25. p DEĞERİ YAZDIRMA FONKSİYONU
+# ======================================================================
+
+p_yaz <- function(p) {
+  
+  if (is.na(p)) {
+    
+    return("NA")
+    
+  } else if (p < 0.001) {
+    
+    return("<0.001")
+    
+  } else {
+    
+    return(
+      sprintf("%.3f", p)
+    )
+    
+  }
+  
+}
+
+
+# ======================================================================
+# 26. ANA YAYIN TABLOSU
+# ======================================================================
+#
+# İSTEDİĞİMİZ TABLO:
+#
+# Değişken
+# Rezidü negatif
+# Rezidü pozitif
+# Grup karşılaştırması p
+# OR (%95 GA)
+# Lojistik p
+#
+# ======================================================================
+
+ana_tablo <- data.frame(
+  
+  Degisken =
+    "İlk LEEP–re-LEEP süresi, ay",
+  
+  
+  Rezidu_negatif =
+    sprintf(
+      "%.1f (%.1f–%.1f)",
+      neg$Medyan,
+      neg$Q1,
+      neg$Q3
+    ),
+  
+  
+  Rezidu_pozitif =
+    sprintf(
+      "%.1f (%.1f–%.1f)",
+      poz$Medyan,
+      poz$Q1,
+      poz$Q3
+    ),
+  
+  
+  Mann_Whitney_p =
+    p_yaz(p_mw),
+  
+  
+  OR_1_ay_95_GA =
+    sprintf(
+      "%.3f (%.3f–%.3f)",
+      OR_1ay,
+      Alt95_1ay,
+      Ust95_1ay
+    ),
+  
+  
+  Lojistik_p =
+    p_yaz(p_logistik),
+  
+  
+  check.names = FALSE
+)
+
+
+# ======================================================================
+# 27. TABLO SÜTUN İSİMLERİ
+# ======================================================================
+
+names(ana_tablo) <- c(
+  
+  "Değişken",
+  
+  paste0(
+    "Rezidü negatif\nN = ",
+    n_negatif,
+    "\nMedyan (IQR)"
+  ),
+  
+  paste0(
+    "Rezidü pozitif\nN = ",
+    n_pozitif,
+    "\nMedyan (IQR)"
+  ),
+  
+  "Mann–Whitney p",
+  
+  "OR / 1 ay (%95 GA)",
+  
+  "Lojistik p"
+  
+)
+
+
+# ======================================================================
+# 28. R KONSOLUNDA NORMAL TABLO
+# ======================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("ANA SONUÇ TABLOSU\n")
+cat("============================================================\n\n")
+
+print(
+  ana_tablo,
+  row.names = FALSE
+)
+
+
+# ======================================================================
+# 29. RSTUDIO VIEWER İÇİN GT TABLOSU
+# ======================================================================
+
+gt_tablo <- ana_tablo %>%
+  
+  gt() %>%
+  
+  tab_header(
+    
+    title =
+      md(
+        "**İlk LEEP ile re-LEEP arasındaki sürenin rezidü hastalık ile ilişkisi**"
+      ),
+    
+    subtitle =
+      md(
+        paste0(
+          "Toplam N = ",
+          n_toplam,
+          " | Süre takvim ayı olarak hesaplanmıştır"
+        )
+      )
+    
+  ) %>%
+  
+  cols_align(
+    align = "left",
+    columns = 1
+  ) %>%
+  
+  cols_align(
+    align = "center",
+    columns = 2:6
+  ) %>%
+  
+  tab_source_note(
+    
+    source_note = md(
+      paste0(
+        "**Veriler:** Medyan (IQR). ",
+        "**Grup karşılaştırması:** Mann–Whitney U testi. ",
+        "**OR:** Tek değişkenli lojistik regresyonda ",
+        "ilk LEEP–re-LEEP süresindeki her 1 aylık artış için ",
+        "rezidü hastalık odds oranı. ",
+        "GA: güven aralığı."
+      )
+    )
+    
+  ) %>%
+  
+  tab_options(
+    
+    table.font.size = px(13),
+    
+    heading.title.font.size = px(16),
+    
+    heading.subtitle.font.size = px(12),
+    
+    data_row.padding = px(8)
+    
+  )
+
+
+# ======================================================================
+# 30. TABLOYU RSTUDIO VIEWER'DA GÖSTER
+# ======================================================================
+#
+# BU SATIR ÇALIŞTIĞINDA TABLO VIEWER'DA AÇILIR.
+#
+# ======================================================================
+
+gt_tablo
+
+
+# ======================================================================
+# 31. İKİNCİ TABLO:
+#     LOJİSTİK REGRESYON SONUÇLARI
+# ======================================================================
+
+regresyon_tablo <- data.frame(
+  
+  Ölçek = c(
+    "Her 1 aylık artış",
+    "Her 3 aylık artış"
+  ),
+  
+  OR = c(
+    OR_1ay,
+    OR_3ay
+  ),
+  
+  Alt95 = c(
+    Alt95_1ay,
+    Alt95_3ay
+  ),
+  
+  Ust95 = c(
+    Ust95_1ay,
+    Ust95_3ay
+  ),
+  
+  p = c(
+    p_logistik,
+    p_logistik
+  )
+)
+
+
+regresyon_tablo <- regresyon_tablo %>%
+  mutate(
+    
+    OR = round(OR, 3),
+    
+    Alt95 = round(Alt95, 3),
+    
+    Ust95 = round(Ust95, 3),
+    
+    p = ifelse(
+      p < 0.001,
+      "<0.001",
+      sprintf("%.3f", p)
+    )
+    
+  )
+
+
+names(regresyon_tablo) <- c(
+  "Süre ölçeği",
+  "OR",
+  "%95 GA alt",
+  "%95 GA üst",
+  "p"
+)
+
+
+# ======================================================================
+# 32. REGRESYON TABLOSUNU RSTUDIO VIEWER'DA GÖSTER
+# ======================================================================
+
+gt_regresyon <- regresyon_tablo %>%
+  
+  gt() %>%
+  
+  tab_header(
+    
+    title = md(
+      "**İlk LEEP–re-LEEP süresi ve rezidü hastalık: lojistik regresyon**"
+    )
+    
+  ) %>%
+  
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) %>%
+  
+  tab_source_note(
+    
+    source_note = md(
+      paste0(
+        "Outcome: re-LEEP final patolojisinde rezidü hastalık ",
+        "(0 = negatif, 1 = pozitif). ",
+        "Tek değişkenli lojistik regresyon."
+      )
+    )
+    
+  )
+
+
+# İstersen bunu da Viewer'da görmek için:
+gt_regresyon
+
+
+# ======================================================================
+# 33. WORD İÇİN FLEXTABLE
+# ======================================================================
+
+ft <- flextable(
+  ana_tablo
+)
+
+ft <- theme_booktabs(
+  ft
+)
+
+ft <- bold(
+  ft,
+  part = "header"
+)
+
+ft <- align(
+  ft,
+  j = 1,
+  align = "left",
+  part = "all"
+)
+
+ft <- align(
+  ft,
+  j = 2:ncol(ana_tablo),
+  align = "center",
+  part = "all"
+)
+
+ft <- valign(
+  ft,
+  valign = "center",
+  part = "all"
+)
+
+ft <- autofit(ft)
+
+
+# ======================================================================
+# 34. WORD DOSYASI
+# ======================================================================
+
+word_yolu <- file.path(
+  ana_klasor,
+  "ReLEEP_Sure_Rezidu_TABLO.docx"
+)
+
+doc <- read_docx()
+
+doc <- body_add_par(
+  doc,
+  "İlk LEEP ile re-LEEP arasındaki sürenin rezidü hastalık ile ilişkisi",
+  style = "heading 1"
+)
+
+doc <- body_add_flextable(
+  doc,
+  value = ft
+)
+
+doc <- body_add_par(
+  doc,
+  paste0(
+    "Veriler medyan (IQR) olarak verilmiştir. ",
+    "Gruplar Mann–Whitney U testi ile karşılaştırılmıştır. ",
+    "OR ve %95 güven aralığı tek değişkenli lojistik ",
+    "regresyon ile hesaplanmıştır. OR, ilk LEEP ile re-LEEP ",
+    "arasındaki sürede her 1 aylık artışı göstermektedir."
+  )
+)
+
+print(
+  doc,
+  target = word_yolu
+)
+
+
+# ======================================================================
+# 35. HTML TABLO
+# ======================================================================
+
+html_yolu <- file.path(
+  ana_klasor,
+  "ReLEEP_Sure_Rezidu_TABLO.html"
+)
+
+gtsave(
+  gt_tablo,
+  filename = html_yolu
+)
+
+
+# ======================================================================
+# 36. EXCEL DOSYASI
+# ======================================================================
+
+excel_yolu <- file.path(
+  ana_klasor,
+  "ReLEEP_Sure_Rezidu_TABLO.xlsx"
+)
+
+
+write_xlsx(
+  
+  list(
+    
+    "Ana_Tablo" =
+      ana_tablo,
+    
+    "Regresyon" =
+      regresyon_tablo,
+    
+    "Tanımlayıcı" =
+      as.data.frame(ozet),
+    
+    "Analiz_Verisi" =
+      as.data.frame(analiz)
+    
+  ),
+  
+  path = excel_yolu
+  
+)
+
+
+# ======================================================================
+# 37. SONUÇLARI KONSOLA YAZ
+# ======================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("ANALİZ SONUÇLARI\n")
+cat("============================================================\n\n")
+
+cat(
+  "Toplam N =",
+  n_toplam,
+  "\n"
+)
+
+cat(
+  "Rezidü negatif N =",
+  n_negatif,
+  "\n"
+)
+
+cat(
+  "Rezidü pozitif N =",
+  n_pozitif,
+  "\n\n"
+)
+
+cat(
+  "Rezidü negatif medyan süre =",
+  round(neg$Medyan, 1),
+  "ay (IQR",
+  round(neg$Q1, 1),
+  "–",
+  round(neg$Q3, 1),
+  ")\n"
+)
+
+cat(
+  "Rezidü pozitif medyan süre =",
+  round(poz$Medyan, 1),
+  "ay (IQR",
+  round(poz$Q1, 1),
+  "–",
+  round(poz$Q3, 1),
+  ")\n\n"
+)
+
+cat(
+  "Mann-Whitney p =",
+  round(p_mw, 4),
+  "\n\n"
+)
+
+cat(
+  "Her 1 aylık artış için OR =",
+  round(OR_1ay, 3),
+  "\n"
+)
+
+cat(
+  "%95 GA =",
+  round(Alt95_1ay, 3),
+  "–",
+  round(Ust95_1ay, 3),
+  "\n"
+)
+
+cat(
+  "Lojistik regresyon p =",
+  round(p_logistik, 4),
+  "\n"
+)
+
+
+# ======================================================================
+# 38. DOSYA KONTROLÜ
+# ======================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("OLUŞTURULAN DOSYALAR\n")
+cat("============================================================\n\n")
+
+cat(
+  "WORD:\n",
+  word_yolu,
+  "\n\n"
+)
+
+cat(
+  "EXCEL:\n",
+  excel_yolu,
+  "\n\n"
+)
+
+cat(
+  "HTML:\n",
+  html_yolu,
+  "\n\n"
+)
+
+
+# ======================================================================
+# 39. SON OLARAK ANA TABLOYU VIEWER'DA AÇ
+# ======================================================================
+#
+# Scriptin en sonunda Viewer'da ana tablo kalsın.
+#
+# ======================================================================
+
+gt_tablo
+
+
+# ======================================================================
+# ======================================================================
+#
+#                       ANALİZ BİTTİ
+#
+# ======================================================================
+# ======================================================================
