@@ -1,0 +1,1266 @@
+# =====================================================================
+# =====================================================================
+#
+#     LEEP ÇALIŞMASI
+#     DEMOGRAFİK ÖZELLİKLER - FİNAL TABLE 1 KODU (v2)
+#
+# =====================================================================
+# =====================================================================
+#
+# AMAÇ:
+#
+# Rezidü negatif ve rezidü pozitif hastaların demografik
+# özelliklerini karşılaştırmak.
+#
+# Table 1:
+#
+#                       Rezidü (-)     Rezidü (+)       p
+# Yaş                    mean ± SD      mean ± SD
+# BMI                    mean ± SD      mean ± SD
+# Gravida                median (IQR)   median (IQR)
+# Parite                 median (IQR)   median (IQR)
+# Abortus                median (IQR)   median (IQR)
+# NSD                    median (IQR)   median (IQR)
+# C/S                    median (IQR)   median (IQR)
+# Menopoz                n (%)          n (%)
+# Sigara                 n (%)          n (%)
+#
+# Testler:
+#
+# Yaş, BMI        -> Welch bağımsız örneklem t-testi
+#
+# Gravida,
+# Parite,
+# Abortus,
+# NSD,
+# C/S             -> Mann-Whitney U / Wilcoxon rank-sum
+#
+# Menopoz,
+# Sigara          -> Fisher exact test
+#
+# ---------------------------------------------------------------------
+# BU SÜRÜMDE (v2) YAPILAN DEĞİŞİKLİKLER:
+#
+# 1) Dosya "leep_tlh.xlsx" (yeni versiyon) için doğrulandı.
+#    60 hasta, 34 değişken bekleniyor - gerçek veriyle eşleşiyor.
+#
+# 2) GÜVENLİK KONTROLÜ eklendi: sütun sayısı 34 değilse script
+#    DURUR ve uyarı verir. Böylece ileride dosya yapısı değişirse
+#    sütunlar yanlış isimlerle eşleşip fark edilmeden hatalı
+#    sonuç üretilmez.
+#
+# 3) Rezidü kolonunda 0/1 DIŞINDA bir kod varsa (örn. veri girişi
+#    hatasıyla "2" gibi) artık hem sayısı hem hasta numarası
+#    açıkça ekrana basılıyor (önceden sessizce NA olup atılıyordu).
+#
+# 4) SABİT KODLANMIŞ N SORUNU DÜZELTİLDİ:
+#    Eskiden başlıklarda "n=31", "n=27" gibi ELLE YAZILMIŞ sayılar
+#    vardı. Veri değişirse bu sayılar YANLIŞ kalmaya devam ederdi.
+#    Şimdi {n} ve {level} placeholder'ları ile N her çalıştırmada
+#    OTOMATİK ve DOĞRU hesaplanıyor.
+#
+# 5) Eski koddaki "dipnot numarasının N'ye yapışması" hatasının
+#    kök nedenini (otomatik footnote) modify_footnote() ile
+#    temizledik - artık hem dinamik N hem temiz görünüm bir arada.
+# =====================================================================
+
+
+
+# =====================================================================
+# 1. R ORTAMINI TEMİZLE
+# =====================================================================
+
+rm(list = ls())
+
+graphics.off()
+
+
+
+# =====================================================================
+# 2. GEREKLİ PAKETLER
+# =====================================================================
+
+library(readxl)
+
+library(dplyr)
+
+library(gtsummary)
+
+library(gt)
+
+library(writexl)
+
+
+
+# =====================================================================
+# 3. DOSYA YOLU
+# =====================================================================
+#
+# NOT: Bu satırı kendi bilgisayarınızdaki gerçek dosya
+# yoluna göre güncelleyin.
+# =====================================================================
+
+leep_yolu <- "/Users/abdullah/Desktop/ablam tez/leep_tlh.xlsx"
+
+
+
+# =====================================================================
+# 4. DOSYA VAR MI?
+# =====================================================================
+
+if (!file.exists(leep_yolu)) {
+    
+    stop(
+        "Dosya bulunamadı: ", leep_yolu,
+        "\nLütfen 'leep_yolu' değişkenini kontrol edin."
+    )
+    
+}
+
+
+
+# =====================================================================
+# 5. EXCEL DOSYASINI DOĞRU ŞEKİLDE OKU
+# =====================================================================
+#
+# ÇOK ÖNEMLİ:
+#
+# Excel'in ilk satırı grup başlıklarından oluşuyor:
+#
+# Tanımlayıcı
+# İlk LEEP - Materyal
+# İlk LEEP - Patoloji
+# Re-eksizyon
+# ...
+#
+# Gerçek değişken isimleri ikinci satırda.
+#
+# Bu nedenle:
+#
+# skip = 1
+#
+# kullanıyoruz.
+# =====================================================================
+
+
+leep_raw <- read_excel(
+    path = leep_yolu,
+    sheet = "Sayfa1",
+    skip = 1
+)
+
+
+
+# =====================================================================
+# 6. OKUMA DOĞRU MU KONTROL ET (GÜVENLİK KONTROLÜ - YENİ)
+# =====================================================================
+#
+# Sütun sayısı beklenenden farklıysa, pozisyona göre isim verme
+# (bkz. Bölüm 8) YANLIŞ değişkenlere YANLIŞ isim verebilir ve
+# bu fark edilmeden analiz devam edebilir. Bu yüzden burada
+# script'i durduruyoruz.
+# =====================================================================
+
+cat("\n")
+cat("============================================\n")
+cat("HAM VERİ BOYUTU\n")
+cat("============================================\n")
+
+cat("Satır sayısı:", nrow(leep_raw), "\n")
+cat("Sütun sayısı:", ncol(leep_raw), "\n")
+
+
+BEKLENEN_SUTUN_SAYISI <- 34
+
+if (ncol(leep_raw) != BEKLENEN_SUTUN_SAYISI) {
+    
+    cat("\nMEVCUT SÜTUN İSİMLERİ:\n")
+    
+    print(names(leep_raw))
+    
+    stop(
+        
+        "Beklenen sütun sayısı ", BEKLENEN_SUTUN_SAYISI,
+        " idi, ama dosyada ", ncol(leep_raw), " sütun bulundu.\n",
+        "Sütun sırası değişmiş olabilir - Bölüm 8'deki isim ",
+        "atamalarını (names(analiz)[i] <- ...) ELLE kontrol edin, ",
+        "aksi halde yanlış değişkene yanlış isim verilebilir."
+        
+    )
+    
+}
+
+
+head(leep_raw)
+
+
+# Yaklaşık:
+#
+# 60 hasta
+# 34 değişken
+#
+# görmelisin.
+
+
+
+# =====================================================================
+# 7. HAM VERİNİN R İÇİNDE YEDEĞİNİ AL
+# =====================================================================
+
+leep_orijinal <- leep_raw
+
+
+# Bundan sonra:
+#
+# analiz
+#
+# isimli kopya üzerinde çalışacağız.
+
+analiz <- leep_raw
+
+
+
+# =====================================================================
+# 8. DEĞİŞKEN İSİMLERİNİ TEMİZLE
+# =====================================================================
+#
+# Excel'deki sütunların sırasını senin dosyana göre biliyoruz.
+#
+# Bu nedenle sütunlara kısa ve güvenli R isimleri veriyoruz.
+#
+# Excel dosyasının kendisi DEĞİŞMİYOR.
+# Sadece R içindeki isimler değişiyor.
+#
+# NOT: Bu atama SÜTUN POZİSYONUNA göre yapılıyor, Excel'deki
+# ham başlık metnine göre DEĞİL. Bu yüzden Excel'deki başlıklarda
+# ufak yazım/typo farkları (örn. "K-A" vs "K-A-E", "Menopoz_Durumu"
+# vs "Menepoz_DürümÜ") olsa bile kod bozulmaz - önemli olan
+# sütunların Excel'deki SIRASININ değişmemesidir (bkz. Bölüm 6'daki
+# güvenlik kontrolü).
+# =====================================================================
+
+
+names(analiz)[1]  <- "hasta_no"
+
+names(analiz)[2]  <- "yas"
+
+names(analiz)[3]  <- "bmi"
+
+names(analiz)[4]  <- "gravida"
+
+names(analiz)[5]  <- "parite"
+
+names(analiz)[6]  <- "abortus"
+
+names(analiz)[7]  <- "nsd"
+
+names(analiz)[8]  <- "cs"
+
+names(analiz)[9]  <- "menopoz"
+
+names(analiz)[10] <- "leep_konizasyon"
+
+names(analiz)[11] <- "ilk_leep_tarihi"
+
+names(analiz)[12] <- "eksen_3_9"
+
+names(analiz)[13] <- "eksen_6_12"
+
+names(analiz)[14] <- "kalinlik"
+
+names(analiz)[15] <- "materyal_butunlugu"
+
+names(analiz)[16] <- "parca_sayisi"
+
+names(analiz)[17] <- "termal_artefakt"
+
+names(analiz)[18] <- "ilk_leep_patoloji"
+
+names(analiz)[19] <- "ecc"
+
+names(analiz)[20] <- "glanduler_tutulum"
+
+names(analiz)[21] <- "cerrahi_sinir"
+
+names(analiz)[22] <- "sinir_pozitif_yeri"
+
+names(analiz)[23] <- "ki67"
+
+names(analiz)[24] <- "p16"
+
+names(analiz)[25] <- "reeksizyon_yontemi"
+
+names(analiz)[26] <- "reeksizyon_tarihi"
+
+names(analiz)[27] <- "rezidu"
+
+names(analiz)[28] <- "rezidu_derecesi"
+
+names(analiz)[29] <- "reeksizyon_cerrahi_sinir"
+
+names(analiz)[30] <- "reeksizyon_glanduler_tutulum"
+
+names(analiz)[31] <- "notlar"
+
+names(analiz)[32] <- "sigara"
+
+names(analiz)[33] <- "paket_yil"
+
+names(analiz)[34] <- "diger"
+
+
+
+# =====================================================================
+# 9. İSİMLERİ KONTROL ET
+# =====================================================================
+
+names(analiz)
+
+
+
+# =====================================================================
+# 10. DEMOGRAFİK DEĞİŞKENLERİ NUMERIC YAP
+# =====================================================================
+#
+# Buradaki kritik nokta:
+#
+# Parite, abortus, NSD ve C/S sayısal değişkenlerdir.
+#
+# Bunların kategorik değişken olmasını İSTEMİYORUZ.
+#
+# Ham veride bazı hücrelerde metin olarak "NA" yazıyor
+# (örn. BMI, sigara, paket_yıl kolonlarında). as.numeric()
+# bu metni otomatik olarak gerçek NA'ya çevirir, veri
+# kaybı yaratmaz.
+# =====================================================================
+
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        yas =
+            suppressWarnings(as.numeric(yas)),
+        
+        bmi =
+            suppressWarnings(as.numeric(bmi)),
+        
+        gravida =
+            suppressWarnings(as.numeric(gravida)),
+        
+        parite =
+            suppressWarnings(as.numeric(parite)),
+        
+        abortus =
+            suppressWarnings(as.numeric(abortus)),
+        
+        nsd =
+            suppressWarnings(as.numeric(nsd)),
+        
+        cs =
+            suppressWarnings(as.numeric(cs)),
+        
+        menopoz =
+            suppressWarnings(as.numeric(menopoz)),
+        
+        rezidu =
+            suppressWarnings(as.numeric(rezidu)),
+        
+        sigara =
+            suppressWarnings(as.numeric(sigara))
+        
+    )
+
+
+
+# =====================================================================
+# 11. GERÇEKTEN NUMERIC OLDULAR MI?
+# =====================================================================
+
+str(
+    analiz[
+        c(
+            "yas",
+            "bmi",
+            "gravida",
+            "parite",
+            "abortus",
+            "nsd",
+            "cs",
+            "menopoz",
+            "sigara",
+            "rezidu"
+        )
+    ]
+)
+
+
+
+# Hepsinin:
+#
+# num
+#
+# olması gerekiyor.
+
+
+
+# =====================================================================
+# 12. REZİDÜ HAM DEĞERLERİNİ KONTROL ET
+# =====================================================================
+
+table(
+    analiz$rezidu,
+    useNA = "ifany"
+)
+
+
+
+# =====================================================================
+# 13. GEÇERSİZ REZİDÜ KODU VAR MI? (YENİ: artık açıkça raporlanıyor)
+# =====================================================================
+#
+# Rezidü:
+#
+# 0 = yok
+# 1 = var
+#
+# olmalı.
+#
+# Başka değer varsa (örn. veri girişi hatasıyla "2" gibi) bu
+# hastalar aşağıda hasta numarasıyla birlikte listeleniyor VE
+# bu hastalar analiz dışı kalacağı için ayrıca uyarı veriliyor.
+# =====================================================================
+
+
+gecersiz_rezidu <- analiz %>%
+    
+    filter(
+        !is.na(rezidu),
+        !(rezidu %in% c(0, 1))
+    ) %>%
+    
+    select(
+        hasta_no,
+        rezidu,
+        notlar
+    )
+
+
+cat("\n")
+cat("============================================\n")
+cat("GEÇERSİZ REZİDÜ KODU OLAN HASTALAR\n")
+cat("(0/1 dışında bir değer - analiz dışı kalacak)\n")
+cat("============================================\n")
+
+print(gecersiz_rezidu)
+
+if (nrow(gecersiz_rezidu) > 0) {
+    
+    cat(
+        "\nUYARI:", nrow(gecersiz_rezidu),
+        "hastada rezidü kodu 0/1 dışında. Bu hastaların\n",
+        "gerçek rezidü sonucunu ham veriden (Notlar sütunu dahil)\n",
+        "kontrol edip düzeltmeniz önerilir.\n"
+    )
+    
+}
+
+
+
+# =====================================================================
+# 14. REZİDÜ GRUBU OLUŞTUR
+# =====================================================================
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        rezidu_grup = case_when(
+            
+            rezidu == 0 ~ "Rezidü negatif",
+            
+            rezidu == 1 ~ "Rezidü pozitif",
+            
+            TRUE ~ NA_character_
+            
+        )
+        
+    )
+
+
+
+# =====================================================================
+# 15. REZİDÜ GRUBUNU FACTOR YAP
+# =====================================================================
+
+analiz$rezidu_grup <- factor(
+    
+    analiz$rezidu_grup,
+    
+    levels = c(
+        "Rezidü negatif",
+        "Rezidü pozitif"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 16. REZİDÜ GRUP SAYILARINI KONTROL ET
+# =====================================================================
+
+table(
+    analiz$rezidu_grup,
+    useNA = "ifany"
+)
+
+
+
+# =====================================================================
+# 17. SİGARA DEĞİŞKENİNİ KONTROL ET
+# =====================================================================
+
+table(
+    analiz$sigara,
+    useNA = "ifany"
+)
+
+
+
+# =====================================================================
+# 18. SİGARA İÇİN OKUNABİLİR FACTOR OLUŞTUR
+# =====================================================================
+#
+# 0 = Hayır
+# 1 = Evet
+# =====================================================================
+
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        sigara_grup = case_when(
+            
+            sigara == 0 ~ "Hayır",
+            
+            sigara == 1 ~ "Evet",
+            
+            TRUE ~ NA_character_
+            
+        )
+        
+    )
+
+
+analiz$sigara_grup <- factor(
+    
+    analiz$sigara_grup,
+    
+    levels = c(
+        "Hayır",
+        "Evet"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 19. MENOPOZ İÇİN OKUNABİLİR FACTOR
+# =====================================================================
+#
+# Kodlama:
+#
+# 0 = Premenopoz
+# 1 = Postmenopoz
+# =====================================================================
+
+
+analiz <- analiz %>%
+    
+    mutate(
+        
+        menopoz_grup = case_when(
+            
+            menopoz == 0 ~ "Premenopoz",
+            
+            menopoz == 1 ~ "Postmenopoz",
+            
+            TRUE ~ NA_character_
+            
+        )
+        
+    )
+
+
+analiz$menopoz_grup <- factor(
+    
+    analiz$menopoz_grup,
+    
+    levels = c(
+        "Premenopoz",
+        "Postmenopoz"
+    )
+    
+)
+
+
+
+# =====================================================================
+# 20. FACTORLARI KONTROL ET
+# =====================================================================
+
+table(
+    analiz$menopoz_grup,
+    useNA = "ifany"
+)
+
+
+table(
+    analiz$sigara_grup,
+    useNA = "ifany"
+)
+
+
+
+# =====================================================================
+# 21. ANALİZDE KULLANILACAK HASTALARI OLUŞTUR
+# =====================================================================
+#
+# Rezidü sonucu kesin olarak:
+#
+# 0 veya 1
+#
+# olan hastaları Table 1 analizine alıyoruz.
+#
+# Rezidü sonucu bilinmeyen (NA) veya geçersiz kodlu (örn. "2")
+# hastalar grup karşılaştırmasına giremez.
+# =====================================================================
+
+
+demografi <- analiz %>%
+    
+    filter(
+        !is.na(rezidu_grup)
+    )
+
+
+
+# =====================================================================
+# 22. ANALİZDE KAÇ HASTA VAR?
+# =====================================================================
+
+cat("\n")
+cat("============================================\n")
+cat("ANALİZE GİREN HASTA SAYISI\n")
+cat("============================================\n")
+
+cat("Toplam hasta (ham veri):", nrow(analiz), "\n")
+cat("Analize giren hasta (rezidü sonucu net):", nrow(demografi), "\n")
+
+print(
+    table(
+        demografi$rezidu_grup
+    )
+)
+
+
+
+# =====================================================================
+# 23. EKSİK VERİ TABLOSU
+# =====================================================================
+#
+# Table 1'in içine her değişken için "Unknown" satırı koymak
+# yerine eksikliği burada ayrıca kontrol ediyoruz.
+#
+# Bu daha temiz bir Table 1 üretir.
+# =====================================================================
+
+
+eksik_veri <- data.frame(
+    
+    Degisken = c(
+        "Yaş",
+        "BMI",
+        "Gravida",
+        "Parite",
+        "Abortus",
+        "NSD",
+        "C/S",
+        "Menopoz",
+        "Sigara"
+    ),
+    
+    Eksik_n = c(
+        
+        sum(is.na(demografi$yas)),
+        
+        sum(is.na(demografi$bmi)),
+        
+        sum(is.na(demografi$gravida)),
+        
+        sum(is.na(demografi$parite)),
+        
+        sum(is.na(demografi$abortus)),
+        
+        sum(is.na(demografi$nsd)),
+        
+        sum(is.na(demografi$cs)),
+        
+        sum(is.na(demografi$menopoz_grup)),
+        
+        sum(is.na(demografi$sigara_grup))
+        
+    )
+    
+)
+
+
+eksik_veri <- eksik_veri %>%
+    
+    mutate(
+        
+        Eksik_yuzde =
+            round(
+                100 * Eksik_n / nrow(demografi),
+                1
+            )
+        
+    )
+
+
+cat("\n")
+cat("============================================\n")
+cat("EKSİK VERİ ÖZETİ\n")
+cat("============================================\n")
+
+print(eksik_veri)
+
+
+
+# =====================================================================
+# 24. NORMAL DAĞILIM KONTROLÜ
+# =====================================================================
+#
+# Yaş ve BMI için normaliteyi her rezidü grubunda
+# ayrı ayrı kontrol ediyoruz.
+#
+# Sadece Shapiro sonucuna kör şekilde karar vermiyoruz;
+# fakat kayıt altına almak yararlı.
+# =====================================================================
+
+cat("\n")
+cat("============================================\n")
+cat("NORMALİTE KONTROLÜ (Shapiro-Wilk)\n")
+cat("============================================\n")
+
+
+cat("\nYaş - Rezidü negatif:\n")
+print(
+    shapiro.test(
+        demografi$yas[
+            demografi$rezidu_grup == "Rezidü negatif" &
+                !is.na(demografi$yas)
+        ]
+    )
+)
+
+
+cat("\nYaş - Rezidü pozitif:\n")
+print(
+    shapiro.test(
+        demografi$yas[
+            demografi$rezidu_grup == "Rezidü pozitif" &
+                !is.na(demografi$yas)
+        ]
+    )
+)
+
+
+cat("\nBMI - Rezidü negatif:\n")
+print(
+    shapiro.test(
+        demografi$bmi[
+            demografi$rezidu_grup == "Rezidü negatif" &
+                !is.na(demografi$bmi)
+        ]
+    )
+)
+
+
+cat("\nBMI - Rezidü pozitif:\n")
+print(
+    shapiro.test(
+        demografi$bmi[
+            demografi$rezidu_grup == "Rezidü pozitif" &
+                !is.na(demografi$bmi)
+        ]
+    )
+)
+
+
+
+# =====================================================================
+# 25. ŞİMDİ ASIL TABLE 1
+# =====================================================================
+#
+# gtsummary bazen az sayıda farklı değer içeren numeric
+# değişkenleri otomatik olarak kategorik kabul eder.
+#
+# Örneğin parite = 1,2,3,4,5... olduğunda bunu ayrı kategoriler
+# olarak gösterebilir. BİZ BUNU İSTEMİYORUZ, bu nedenle
+# type = list(...) içerisinde AÇIKÇA "continuous" diyoruz.
+# =====================================================================
+
+
+table1 <- demografi %>%
+    
+    select(
+        
+        rezidu_grup,
+        
+        yas,
+        
+        bmi,
+        
+        gravida,
+        
+        parite,
+        
+        abortus,
+        
+        nsd,
+        
+        cs,
+        
+        menopoz_grup,
+        
+        sigara_grup
+        
+    ) %>%
+    
+    tbl_summary(
+        
+        by = rezidu_grup,
+        
+        type = list(
+            
+            yas ~ "continuous",
+            
+            bmi ~ "continuous",
+            
+            gravida ~ "continuous",
+            
+            parite ~ "continuous",
+            
+            abortus ~ "continuous",
+            
+            nsd ~ "continuous",
+            
+            cs ~ "continuous",
+            
+            menopoz_grup ~ "categorical",
+            
+            sigara_grup ~ "categorical"
+            
+        ),
+        
+        missing = "no",
+        
+        statistic = list(
+            
+            c(
+                yas,
+                bmi
+            ) ~ "{mean} ± {sd}",
+            
+            c(
+                gravida,
+                parite,
+                abortus,
+                nsd,
+                cs
+            ) ~ "{median} ({p25}–{p75})",
+            
+            all_categorical() ~ "{n} ({p}%)"
+            
+        ),
+        
+        digits = list(
+            
+            c(
+                yas,
+                bmi
+            ) ~ 1,
+            
+            c(
+                gravida,
+                parite,
+                abortus,
+                nsd,
+                cs
+            ) ~ 1,
+            
+            all_categorical() ~ c(0, 1)
+            
+        ),
+        
+        label = list(
+            
+            yas ~ "Yaş, yıl",
+            
+            bmi ~ "BMI, kg/m²",
+            
+            gravida ~ "Gravida",
+            
+            parite ~ "Parite",
+            
+            abortus ~ "Abortus",
+            
+            nsd ~ "NSD sayısı",
+            
+            cs ~ "C/S sayısı",
+            
+            menopoz_grup ~ "Menopoz durumu",
+            
+            sigara_grup ~ "Sigara kullanımı"
+            
+        )
+        
+    )
+
+
+
+# =====================================================================
+# 26. p DEĞERLERİNİ EKLE
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    add_p(
+        
+        test = list(
+            
+            c(
+                yas,
+                bmi
+            ) ~ "t.test",
+            
+            c(
+                gravida,
+                parite,
+                abortus,
+                nsd,
+                cs
+            ) ~ "wilcox.test",
+            
+            c(
+                menopoz_grup,
+                sigara_grup
+            ) ~ "fisher.test"
+            
+        ),
+        
+        pvalue_fun = function(x) {
+            
+            style_pvalue(
+                x,
+                digits = 3
+            )
+            
+        }
+        
+    )
+
+
+
+# =====================================================================
+# 27. DEĞİŞKEN İSİMLERİNİ KALIN YAP
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    bold_labels()
+
+
+
+# =====================================================================
+# 28. p < 0.05 DEĞERLERİNİ KALIN YAP
+# =====================================================================
+
+# table1 <- table1 %>%
+    
+    # bold_p(
+        # t = 0.05
+   # )
+
+
+
+# =====================================================================
+# 29. SÜTUN BAŞLIKLARINI DÜZELT (v2 - ARTIK DİNAMİK)
+# =====================================================================
+#
+# ESKİ SÜRÜM:
+#
+#   stat_1 ~ "**Rezidü negatif (n=31)**",
+#   stat_2 ~ "**Rezidü pozitif (n=27)**",
+#
+# SORUN: n=31 ve n=27 elle yazılmıştı. Veri değişirse (yeni
+# hasta eklenirse, bir hata düzeltilirse) bu sayılar otomatik
+# güncellenmez, YANLIŞ kalmaya devam eder.
+#
+# YENİ SÜRÜM: {level} ve {n} placeholder'ları kullanılıyor.
+# Bunlar gtsummary tarafından HER ÇALIŞTIRMADA veriden otomatik
+# hesaplanır - elle güncelleme gerekmez, hata riski kalmaz.
+#
+# Ayrıca modify_footnote() ile bu kolonlara otomatik eklenen
+# footnote'ları temizliyoruz - eski sürümde "N = 31" yanına
+# bir dipnot numarasının yapışıp "N = 311" gibi görünmesine
+# neden olan sorunun kök nedeni buydu.
+# =====================================================================
+
+
+table1 <- table1 %>%
+    
+    modify_header(
+        
+        label ~ "**Özellik**",
+        
+        all_stat_cols() ~ "**{level}**, N = {n}",
+        
+        p.value ~ "**p değeri**"
+        
+    ) %>%
+    
+    modify_footnote(
+        
+        all_stat_cols() ~ NA
+        
+    )
+
+
+
+# =====================================================================
+# 30. TABLO BAŞLIĞI
+# =====================================================================
+
+table1 <- table1 %>%
+    
+    modify_caption(
+        
+        "**Tablo 1. Rezidüel hastalık durumuna göre demografik karakteristikler**"
+        
+    )
+
+
+
+# =====================================================================
+# 31. TABLE 1'İ EKRANDA GÖSTER
+# =====================================================================
+
+table1
+
+
+
+# =====================================================================
+# 32. TABLE 1'İN İÇ VERİSİNİ KONTROL ET
+# =====================================================================
+#
+# Bu özellikle hata kontrolü için yararlı - başlıklardaki
+# {n} değerlerinin gerçekten doğru hesaplandığını burada da
+# çapraz kontrol edebilirsiniz.
+# =====================================================================
+
+table1$table_body
+
+
+
+# =====================================================================
+# 33. TABLE 1'İ HTML OLARAK KAYDET
+# =====================================================================
+
+table1_gt <- as_gt(
+    table1
+)
+
+
+gtsave(
+    
+    table1_gt,
+    
+    filename =
+        "/Users/abdullah/Desktop/ablam tez/Table1_demografik.html"
+    
+)
+
+
+
+# =====================================================================
+# 34. WORD'E AKTARMAK İSTİYORSAN
+# =====================================================================
+#
+# Bu iki paket bilgisayarında yoksa SADECE BİR KEZ:
+#
+# install.packages("flextable")
+# install.packages("officer")
+#
+# çalıştır.
+# =====================================================================
+
+
+if (!requireNamespace("flextable", quietly = TRUE)) {
+    
+    install.packages("flextable")
+    
+}
+
+
+if (!requireNamespace("officer", quietly = TRUE)) {
+    
+    install.packages("officer")
+    
+}
+
+
+
+library(flextable)
+
+library(officer)
+
+
+
+# =====================================================================
+# 35. GTSUMMARY -> FLEXTABLE
+# =====================================================================
+
+table1_word <- as_flex_table(
+    table1
+)
+
+
+
+# =====================================================================
+# 36. WORD DOSYASINI KAYDET
+# =====================================================================
+
+save_as_docx(
+    
+    "Table 1" = table1_word,
+    
+    path =
+        "/Users/abdullah/Desktop/ablam tez/Table1_demografik.docx"
+    
+)
+
+
+
+# =====================================================================
+# 37. EKSİK VERİ TABLOSUNU EXCEL'E KAYDET
+# =====================================================================
+
+write_xlsx(
+    
+    eksik_veri,
+    
+    "/Users/abdullah/Desktop/ablam tez/eksik_veri_demografik.xlsx"
+    
+)
+
+
+
+# =====================================================================
+# 38. TEMİZ ANALİZ VERİSİNİ KAYDET
+# =====================================================================
+#
+# Orijinal dosyayı DEĞİŞTİRMEZ.
+# Ayrı dosya oluşturur.
+# =====================================================================
+
+write_xlsx(
+    
+    analiz,
+    
+    "/Users/abdullah/Desktop/ablam tez/analiz_temiz_veri.xlsx"
+    
+)
+
+
+
+# =====================================================================
+# 39. SON KONTROL
+# =====================================================================
+
+cat(
+    "\n",
+    "===============================================\n",
+    "DEMOGRAFİK ANALİZ TAMAMLANDI\n",
+    "===============================================\n"
+)
+
+
+cat(
+    "\nToplam geçerli rezidü sonucu:",
+    nrow(demografi),
+    "\n"
+)
+
+
+cat(
+    "\nRezidü grupları:\n"
+)
+
+
+print(
+    table(demografi$rezidu_grup)
+)
+
+
+if (nrow(gecersiz_rezidu) > 0) {
+    
+    cat(
+        "\nNOT:", nrow(gecersiz_rezidu),
+        "hasta geçersiz rezidü kodu nedeniyle bu analize DAHİL EDİLMEDİ.\n",
+        "Bkz. Bölüm 13 çıktısı.\n"
+    )
+    
+}
+
+
+
+# =====================================================================
+# 40. DOSYALARIN OLUŞUP OLUŞMADIĞINI KONTROL ET
+# =====================================================================
+
+file.exists(
+    "/Users/abdullah/Desktop/ablam tez/Table1_demografik.docx"
+)
+
+
+file.exists(
+    "/Users/abdullah/Desktop/ablam tez/Table1_demografik.html"
+)
+
+
+file.exists(
+    "/Users/abdullah/Desktop/ablam tez/eksik_veri_demografik.xlsx"
+)
+
+
+
+# =====================================================================
+# 41. R SESSION BİLGİSİ
+# =====================================================================
+
+sessionInfo()
+
+
+
+# =====================================================================
+# =====================================================================
+#
+#                     ANALİZ BİTTİ
+#
+# =====================================================================
+# =====================================================================
