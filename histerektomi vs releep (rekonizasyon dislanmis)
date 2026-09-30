@@ -1,0 +1,1175 @@
+# =====================================================================
+# =====================================================================
+#
+#               LEEP ÇALIŞMASI - TABLE 1 (v2 - DÜZELTİLMİŞ)
+#
+#       HİSTEREKTOMİ vs RE-LEEP GRUPLARININ
+#          DEMOGRAFİK ÖZELLİKLERİ
+#
+# =====================================================================
+# =====================================================================
+#
+# DOSYALAR:
+#
+# leep_tlh.xlsx
+#   -> İlk LEEP sonrası HİSTEREKTOMİ yapılan hastalar
+#
+# veri_toplama.xlsx
+#   -> İlk LEEP sonrası RE-LEEP (ve bir kısmı RE-KONİZASYON)
+#      yapılan hastalar
+#
+#
+# AMAÇ:
+#
+# Histerektomiye giden hastalar ile re-LEEP'e giden hastaların
+# demografik özelliklerini karşılaştırmak.
+#
+# ---------------------------------------------------------------------
+# BU SÜRÜMDE (v2) DÜZELTİLEN KRİTİK HATA:
+#
+# Kod kitabına göre "Re-eksizyon_Yöntemi" değişkeni şöyle
+# kodlanmıştır:
+#
+#   0 = Re-LEEP
+#   1 = Re-konizasyon   <-- Re-LEEP DEĞİL, farklı bir yöntem!
+#   2 = Histerektomi
+#
+# ESKİ (YANLIŞ) SÜRÜM, veri_toplama.xlsx'teki TÜM hastaları
+# (yöntem kodu ne olursa olsun) "Re-LEEP" grubuna atıyordu. Ama
+# gerçek veride veri_toplama.xlsx içinde:
+#
+#   78 hasta -> kod 0 (gerçekten Re-LEEP)
+#    4 hasta -> kod 1 (Re-KONİZASYON - Re-LEEP değil!)
+#
+# Bu 4 hasta yanlışlıkla "Re-LEEP" grubuna dahil ediliyordu.
+# Bu sürüm, Re-eksizyon_Yöntemi sütununu AÇIKÇA OKUYUP sadece
+# kod=0 (gerçek Re-LEEP) olan hastaları "Re-LEEP" grubuna alır;
+# kod=1 (Re-konizasyon) olan 4 hasta bu KARŞILAŞTIRMADAN TAMAMEN
+# ÇIKARILIR (ne Re-LEEP ne Histerektomi grubuna dahil edilir),
+# ve bu dışlama açıkça raporlanır.
+#
+# Ayrıca leep_tlh.xlsx tarafında da, TÜM hastaların gerçekten
+# kod=2 (Histerektomi) olduğu VARSAYIM olarak değil, VERİDEN
+# DOĞRULANARAK kontrol edilir - ileride veri güncellenirse bu
+# varsayım sessizce bozulmaz.
+#
+# TABLE 1:
+#
+#                         Histerektomi       Re-LEEP          p
+#
+# Yaş                     mean ± SD          mean ± SD
+# BMI                     mean ± SD          mean ± SD
+# Gravida                 median (IQR)       median (IQR)
+# Parite                  median (IQR)       median (IQR)
+# Abortus                 median (IQR)       median (IQR)
+# NSD                     median (IQR)       median (IQR)
+# C/S                     median (IQR)       median (IQR)
+# Menopoz                 n (%)              n (%)
+# Sigara                  n (%)              n (%)
+#
+#
+# TESTLER:
+#
+# Yaş, BMI
+#   -> Welch bağımsız örneklem t-testi
+#
+# Gravida, Parite, Abortus, NSD, C/S
+#   -> Mann-Whitney U / Wilcoxon rank-sum
+#
+# Menopoz, Sigara
+#   -> Fisher exact test
+#
+#
+# ÖNEMLİ:
+#
+# Bu analizde REZİDÜ kullanılmaz.
+#
+# Bu analiz yalnızca:
+#
+#       HİSTEREKTOMİ vs RE-LEEP
+#
+# karşılaştırmasıdır (Re-konizasyon hariç tutulur).
+#
+# =====================================================================
+
+
+
+# =====================================================================
+# 1. R ORTAMINI TEMİZLE
+# =====================================================================
+
+rm(list = ls())
+
+graphics.off()
+
+
+
+# =====================================================================
+# 2. GEREKLİ PAKETLER
+# =====================================================================
+
+gerekli_paketler <- c(
+    "readxl",
+    "dplyr",
+    "gtsummary",
+    "gt",
+    "writexl",
+    "flextable",
+    "officer"
+)
+
+
+for (p in gerekli_paketler) {
+
+    if (!requireNamespace(p, quietly = TRUE)) {
+
+        install.packages(
+            p,
+            dependencies = TRUE
+        )
+
+    }
+
+}
+
+
+library(readxl)
+library(dplyr)
+library(gtsummary)
+library(gt)
+library(writexl)
+library(flextable)
+library(officer)
+
+
+
+# =====================================================================
+# 3. ANA KLASÖR
+# =====================================================================
+
+ana_klasor <- "/Users/abdullah/Desktop/ablam tez"
+
+
+
+# =====================================================================
+# 4. DOSYA YOLLARI
+# =====================================================================
+
+histerektomi_yolu <- file.path(
+    ana_klasor,
+    "leep_tlh.xlsx"
+)
+
+
+releep_yolu <- file.path(
+    ana_klasor,
+    "veri_toplama.xlsx"
+)
+
+
+
+# =====================================================================
+# 5. DOSYALAR VAR MI?
+# =====================================================================
+
+if (!file.exists(histerektomi_yolu)) {
+
+    stop(
+        "Histerektomi dosyası bulunamadı:\n",
+        histerektomi_yolu
+    )
+
+}
+
+
+if (!file.exists(releep_yolu)) {
+
+    stop(
+        "Re-LEEP dosyası bulunamadı:\n",
+        releep_yolu
+    )
+
+}
+
+
+
+# =====================================================================
+# 6. HİSTEREKTOMİ DOSYASINI OKU
+# =====================================================================
+
+histerektomi_raw <- readxl::read_excel(
+
+    path = histerektomi_yolu,
+
+    sheet = "Sayfa1",
+
+    skip = 1
+
+)
+
+
+
+# =====================================================================
+# 7. RE-LEEP DOSYASINI OKU
+# =====================================================================
+
+releep_raw <- readxl::read_excel(
+
+    path = releep_yolu,
+
+    sheet = "Veri Toplama Formu",
+
+    skip = 3
+
+)
+
+
+
+# =====================================================================
+# 8. HAM VERİ BOYUTLARINI GÖSTER
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("HAM VERİ BOYUTLARI\n")
+cat("============================================================\n\n")
+
+
+cat(
+    "Histerektomi dosyası:",
+    nrow(histerektomi_raw),
+    "satır /",
+    ncol(histerektomi_raw),
+    "sütun\n"
+)
+
+
+cat(
+    "Re-LEEP dosyası:",
+    nrow(releep_raw),
+    "satır /",
+    ncol(releep_raw),
+    "sütun\n\n"
+)
+
+
+
+# =====================================================================
+# 9. HİSTEREKTOMİ DOSYASI KONTROLÜ
+# =====================================================================
+
+if (ncol(histerektomi_raw) != 34) {
+
+    cat("\nMevcut sütun isimleri:\n")
+
+    print(
+        names(histerektomi_raw)
+    )
+
+
+    stop(
+        "\nHATA: leep_tlh.xlsx dosyasında 34 sütun bekleniyordu, ",
+        "fakat ",
+        ncol(histerektomi_raw),
+        " sütun bulundu."
+    )
+
+}
+
+
+
+# =====================================================================
+# 10. RE-LEEP DOSYASI KONTROLÜ
+# =====================================================================
+
+if (ncol(releep_raw) < 39) {
+
+    cat("\nMevcut sütun isimleri:\n")
+
+    print(
+        names(releep_raw)
+    )
+
+
+    stop(
+        "\nHATA: veri_toplama.xlsx beklenen yapıda değil.\n",
+        "En az 39 sütun bekleniyordu, fakat ",
+        ncol(releep_raw),
+        " sütun bulundu."
+    )
+
+}
+
+
+
+# =====================================================================
+# 11. HİSTEREKTOMİ GRUBUNDAN DEMOGRAFİK VERİYİ AL
+# =====================================================================
+#
+# YENİ: Re-eksizyon_Yöntemi (sütun 25) de alınıyor - artık
+# VARSAYIM değil, VERİDEN DOĞRULANACAK.
+# =====================================================================
+
+histerektomi <- histerektomi_raw %>%
+
+    transmute(
+
+        hasta_no =
+            as.character(.[[1]]),
+
+        yas =
+            .[[2]],
+
+        bmi =
+            .[[3]],
+
+        gravida =
+            .[[4]],
+
+        parite =
+            .[[5]],
+
+        abortus =
+            .[[6]],
+
+        nsd =
+            .[[7]],
+
+        cs =
+            .[[8]],
+
+        menopoz =
+            .[[9]],
+
+        reeksizyon_yontemi_ham =
+            suppressWarnings(as.numeric(.[[25]])),
+
+        sigara =
+            .[[32]],
+
+        grup =
+            "Histerektomi"
+
+    )
+
+
+
+# =====================================================================
+# 12. RE-LEEP GRUBUNDAN DEMOGRAFİK VERİYİ AL
+# =====================================================================
+#
+# YENİ: Re-eksizyon_Yöntemi (sütun 25) de alınıyor - bu
+# değişken, aşağıda hangi hastaların GERÇEKTEN Re-LEEP olduğunu
+# belirlemek için kullanılacak (Bölüm 14b).
+# =====================================================================
+
+releep <- releep_raw %>%
+
+    transmute(
+
+        hasta_no =
+            as.character(.[[1]]),
+
+        yas =
+            .[[2]],
+
+        bmi =
+            .[[3]],
+
+        gravida =
+            .[[4]],
+
+        parite =
+            .[[5]],
+
+        abortus =
+            .[[6]],
+
+        nsd =
+            .[[7]],
+
+        cs =
+            .[[8]],
+
+        menopoz =
+            .[[9]],
+
+        reeksizyon_yontemi_ham =
+            suppressWarnings(as.numeric(.[[25]])),
+
+        sigara =
+            .[[39]],
+
+        grup =
+            "Re-LEEP"
+
+    )
+
+
+
+# =====================================================================
+# 13. HASTA NUMARALARINI TEMİZLE
+# =====================================================================
+
+histerektomi <- histerektomi %>%
+
+    mutate(
+        hasta_no = trimws(hasta_no)
+    )
+
+
+releep <- releep %>%
+
+    mutate(
+        hasta_no = trimws(hasta_no)
+    )
+
+
+
+# =====================================================================
+# 14. BOŞ HASTA SATIRLARINI ÇIKAR
+# =====================================================================
+
+histerektomi <- histerektomi %>%
+
+    filter(
+        !is.na(hasta_no),
+        hasta_no != ""
+    )
+
+
+releep <- releep %>%
+
+    filter(
+        !is.na(hasta_no),
+        hasta_no != ""
+    ) %>%
+
+    filter(
+        !grepl(
+            pattern = "^ÖRNEK",
+            x = hasta_no,
+            ignore.case = TRUE
+        )
+    )
+
+
+
+# =====================================================================
+# 14b. RE-EKSİZYON YÖNTEMİNE GÖRE GRUPLARI DOĞRULA VE DÜZELT (YENİ)
+# =====================================================================
+#
+# Kod kitabı:
+#   0 = Re-LEEP
+#   1 = Re-konizasyon  (Re-LEEP DEĞİL - bu karşılaştırmadan çıkar)
+#   2 = Histerektomi
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("RE-EKSİZYON YÖNTEMİ DOĞRULAMASI (kritik düzeltme)\n")
+cat("============================================================\n\n")
+
+cat("Histerektomi dosyasında (leep_tlh.xlsx) yöntem kodu dağılımı:\n")
+print(table(histerektomi$reeksizyon_yontemi_ham, useNA = "ifany"))
+
+cat("\nRe-LEEP dosyasında (veri_toplama.xlsx) yöntem kodu dağılımı:\n")
+print(table(releep$reeksizyon_yontemi_ham, useNA = "ifany"))
+
+
+# --- Histerektomi dosyası: hepsi gerçekten kod=2 mi? ------------------
+
+histerektomi_hatali <- histerektomi %>%
+    filter(is.na(reeksizyon_yontemi_ham) | reeksizyon_yontemi_ham != 2)
+
+if (nrow(histerektomi_hatali) > 0) {
+
+    cat(
+        "\nUYARI:", nrow(histerektomi_hatali),
+        "hasta leep_tlh.xlsx'te olduğu halde yöntem kodu 2",
+        "(Histerektomi) DEĞİL. Bu hastalar analizden çıkarılıyor:\n"
+    )
+
+    print(histerektomi_hatali %>% select(hasta_no, reeksizyon_yontemi_ham))
+
+} else {
+
+    cat(
+        "\nDoğrulandı: leep_tlh.xlsx'teki TÜM hastalar gerçekten",
+        "kod=2 (Histerektomi).\n"
+    )
+
+}
+
+histerektomi <- histerektomi %>%
+    filter(reeksizyon_yontemi_ham == 2)
+
+
+# --- Re-LEEP dosyası: SADECE kod=0 olanlar gerçek Re-LEEP -------------
+
+releep_konizasyon <- releep %>%
+    filter(reeksizyon_yontemi_ham == 1)
+
+releep_diger <- releep %>%
+    filter(
+        is.na(reeksizyon_yontemi_ham) |
+        !(reeksizyon_yontemi_ham %in% c(0, 1))
+    )
+
+cat(
+    "\nveri_toplama.xlsx içinde",
+    nrow(releep_konizasyon),
+    "hasta Re-KONİZASYON (kod=1) - bunlar Re-LEEP DEĞİLDİR,",
+    "bu karşılaştırmadan ÇIKARILACAK:\n"
+)
+
+print(releep_konizasyon %>% select(hasta_no, reeksizyon_yontemi_ham))
+
+if (nrow(releep_diger) > 0) {
+
+    cat(
+        "\nUYARI:", nrow(releep_diger),
+        "hasta ne 0 ne 1 kodunda / eksik - bunlar da çıkarılıyor:\n"
+    )
+
+    print(releep_diger %>% select(hasta_no, reeksizyon_yontemi_ham))
+
+}
+
+releep <- releep %>%
+    filter(reeksizyon_yontemi_ham == 0)
+
+cat(
+    "\nDÜZELTME SONRASI Re-LEEP grubu N =",
+    nrow(releep),
+    "(eskiden yanlışlıkla",
+    nrow(releep) + nrow(releep_konizasyon) + nrow(releep_diger),
+    "idi)\n"
+)
+
+
+
+# =====================================================================
+# 15. YÖNTEM SÜTUNUNU ARTIK ÇIKAR (işimiz bitti)
+# =====================================================================
+
+histerektomi <- histerektomi %>% select(-reeksizyon_yontemi_ham)
+releep       <- releep       %>% select(-reeksizyon_yontemi_ham)
+
+
+
+# =====================================================================
+# 16. SAYISAL DÖNÜŞÜM FONKSİYONU
+# =====================================================================
+
+sayisal_yap <- function(x) {
+
+    suppressWarnings(
+        as.numeric(
+            as.character(x)
+        )
+    )
+
+}
+
+
+
+# =====================================================================
+# 17. HİSTEREKTOMİ DEMOGRAFİK DEĞİŞKENLERİNİ SAYISAL YAP
+# =====================================================================
+
+histerektomi <- histerektomi %>%
+
+    mutate(
+        yas     = sayisal_yap(yas),
+        bmi     = sayisal_yap(bmi),
+        gravida = sayisal_yap(gravida),
+        parite  = sayisal_yap(parite),
+        abortus = sayisal_yap(abortus),
+        nsd     = sayisal_yap(nsd),
+        cs      = sayisal_yap(cs),
+        menopoz = sayisal_yap(menopoz),
+        sigara  = sayisal_yap(sigara)
+    )
+
+
+
+# =====================================================================
+# 18. RE-LEEP DEMOGRAFİK DEĞİŞKENLERİNİ SAYISAL YAP
+# =====================================================================
+
+releep <- releep %>%
+
+    mutate(
+        yas     = sayisal_yap(yas),
+        bmi     = sayisal_yap(bmi),
+        gravida = sayisal_yap(gravida),
+        parite  = sayisal_yap(parite),
+        abortus = sayisal_yap(abortus),
+        nsd     = sayisal_yap(nsd),
+        cs      = sayisal_yap(cs),
+        menopoz = sayisal_yap(menopoz),
+        sigara  = sayisal_yap(sigara)
+    )
+
+
+
+# =====================================================================
+# 19. BİRLEŞTİRMEDEN ÖNCE VERİ TİPLERİNİ KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("BİRLEŞTİRME ÖNCESİ VERİ TİPİ KONTROLÜ\n")
+cat("============================================================\n\n")
+
+cat("Histerektomi hasta_no tipi:", class(histerektomi$hasta_no), "\n")
+cat("Re-LEEP hasta_no tipi:", class(releep$hasta_no), "\n\n")
+
+
+
+# =====================================================================
+# 20. İKİ GRUBU BİRLEŞTİR
+# =====================================================================
+
+analiz <- dplyr::bind_rows(
+    histerektomi,
+    releep
+)
+
+
+
+# =====================================================================
+# 21. GRUP DEĞİŞKENİNİ FACTOR YAP
+# =====================================================================
+
+analiz$grup <- factor(
+    analiz$grup,
+    levels = c("Histerektomi", "Re-LEEP")
+)
+
+
+
+# =====================================================================
+# 22. HASTA SAYILARINI KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("GRUPLARA GÖRE HASTA SAYILARI (DÜZELTİLMİŞ)\n")
+cat("============================================================\n\n")
+
+print(table(analiz$grup, useNA = "ifany"))
+
+
+
+# =====================================================================
+# 23. AYNI HASTA İKİ DOSYADA VAR MI?
+# =====================================================================
+
+ortak_hastalar <- intersect(
+    unique(histerektomi$hasta_no),
+    unique(releep$hasta_no)
+)
+
+cat("\n")
+cat("============================================================\n")
+cat("İKİ DOSYADA ORTAK HASTA KONTROLÜ\n")
+cat("============================================================\n\n")
+
+if (length(ortak_hastalar) == 0) {
+
+    cat("İki dosyada ortak hasta numarası bulunmadı.\n")
+
+} else {
+
+    cat(
+        "UYARI: İki dosyada da bulunan hasta sayısı:",
+        length(ortak_hastalar),
+        "\n\n"
+    )
+
+    print(ortak_hastalar)
+
+}
+
+
+
+# =====================================================================
+# 24. AYNI DOSYA İÇİNDE TEKRARLAYAN HASTA VAR MI?
+# =====================================================================
+
+tekrar_histerektomi <- histerektomi %>%
+    count(hasta_no) %>%
+    filter(n > 1)
+
+tekrar_releep <- releep %>%
+    count(hasta_no) %>%
+    filter(n > 1)
+
+cat("\n")
+cat("============================================================\n")
+cat("TEKRARLAYAN HASTA NUMARASI KONTROLÜ\n")
+cat("============================================================\n\n")
+
+cat("Histerektomi dosyası:\n")
+print(tekrar_histerektomi)
+
+cat("\nRe-LEEP dosyası:\n")
+print(tekrar_releep)
+
+
+
+# =====================================================================
+# 25. MENOPOZ HAM KODLARINI KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("MENOPOZ HAM KODLARI\n")
+cat("============================================================\n\n")
+
+print(table(analiz$menopoz, analiz$grup, useNA = "ifany"))
+
+
+
+# =====================================================================
+# 26. MENOPOZ FACTOR
+# =====================================================================
+
+analiz <- analiz %>%
+
+    mutate(
+        menopoz_grup = case_when(
+            menopoz == 0 ~ "Premenopoz",
+            menopoz == 1 ~ "Postmenopoz",
+            TRUE ~ NA_character_
+        )
+    )
+
+analiz$menopoz_grup <- factor(
+    analiz$menopoz_grup,
+    levels = c("Premenopoz", "Postmenopoz")
+)
+
+
+
+# =====================================================================
+# 27. SİGARA HAM KODLARINI KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("SİGARA HAM KODLARI\n")
+cat("============================================================\n\n")
+
+print(table(analiz$sigara, analiz$grup, useNA = "ifany"))
+
+
+
+# =====================================================================
+# 28. SİGARA FACTOR
+# =====================================================================
+
+analiz <- analiz %>%
+
+    mutate(
+        sigara_grup = case_when(
+            sigara == 0 ~ "Hayır",
+            sigara == 1 ~ "Evet",
+            TRUE ~ NA_character_
+        )
+    )
+
+analiz$sigara_grup <- factor(
+    analiz$sigara_grup,
+    levels = c("Hayır", "Evet")
+)
+
+
+
+# =====================================================================
+# 29. FACTOR DAĞILIMLARINI KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("MENOPOZ DAĞILIMI\n")
+cat("============================================================\n\n")
+
+print(table(analiz$menopoz_grup, analiz$grup, useNA = "ifany"))
+
+cat("\n")
+cat("============================================================\n")
+cat("SİGARA DAĞILIMI\n")
+cat("============================================================\n\n")
+
+print(table(analiz$sigara_grup, analiz$grup, useNA = "ifany"))
+
+
+
+# =====================================================================
+# 30. EKSİK VERİ ÖZETİ
+# =====================================================================
+
+eksik_veri <- analiz %>%
+
+    group_by(grup) %>%
+
+    summarise(
+        Toplam_N      = n(),
+        Yas_eksik     = sum(is.na(yas)),
+        BMI_eksik     = sum(is.na(bmi)),
+        Gravida_eksik = sum(is.na(gravida)),
+        Parite_eksik  = sum(is.na(parite)),
+        Abortus_eksik = sum(is.na(abortus)),
+        NSD_eksik     = sum(is.na(nsd)),
+        CS_eksik      = sum(is.na(cs)),
+        Menopoz_eksik = sum(is.na(menopoz_grup)),
+        Sigara_eksik  = sum(is.na(sigara_grup)),
+        .groups       = "drop"
+    )
+
+cat("\n")
+cat("============================================================\n")
+cat("EKSİK VERİ ÖZETİ\n")
+cat("============================================================\n\n")
+
+print(as.data.frame(eksik_veri))
+
+
+
+# =====================================================================
+# 31. GÜVENLİ SHAPIRO FONKSİYONU
+# =====================================================================
+
+guvenli_shapiro <- function(x) {
+
+    x <- x[!is.na(x)]
+
+    if (length(x) < 3 || length(x) > 5000) {
+        return(NA_real_)
+    }
+
+    if (length(unique(x)) < 2) {
+        return(NA_real_)
+    }
+
+    sonuc <- tryCatch(
+        shapiro.test(x),
+        error = function(e) NULL
+    )
+
+    if (is.null(sonuc)) {
+        return(NA_real_)
+    }
+
+    sonuc$p.value
+}
+
+
+
+# =====================================================================
+# 32. NORMALİTE KONTROLÜ
+# =====================================================================
+
+normalite <- analiz %>%
+
+    group_by(grup) %>%
+
+    summarise(
+        Yas_N         = sum(!is.na(yas)),
+        Yas_Shapiro_p = guvenli_shapiro(yas),
+        BMI_N         = sum(!is.na(bmi)),
+        BMI_Shapiro_p = guvenli_shapiro(bmi),
+        .groups       = "drop"
+    )
+
+cat("\n")
+cat("============================================================\n")
+cat("NORMALİTE KONTROLÜ\n")
+cat("============================================================\n\n")
+
+print(as.data.frame(normalite))
+
+
+
+# =====================================================================
+# 33. TABLE 1
+# =====================================================================
+
+table1 <- analiz %>%
+
+    select(
+        grup, yas, bmi, gravida, parite, abortus, nsd, cs,
+        menopoz_grup, sigara_grup
+    ) %>%
+
+    tbl_summary(
+
+        by = grup,
+
+        type = list(
+            yas ~ "continuous",
+            bmi ~ "continuous",
+            gravida ~ "continuous",
+            parite ~ "continuous",
+            abortus ~ "continuous",
+            nsd ~ "continuous",
+            cs ~ "continuous",
+            menopoz_grup ~ "categorical",
+            sigara_grup ~ "categorical"
+        ),
+
+        missing = "no",
+
+        statistic = list(
+            c(yas, bmi) ~ "{mean} ± {sd}",
+            c(gravida, parite, abortus, nsd, cs) ~ "{median} ({p25}–{p75})",
+            all_categorical() ~ "{n} ({p}%)"
+        ),
+
+        digits = list(
+            c(yas, bmi) ~ 1,
+            c(gravida, parite, abortus, nsd, cs) ~ 1,
+            all_categorical() ~ c(0, 1)
+        ),
+
+        label = list(
+            yas ~ "Yaş, yıl",
+            bmi ~ "BMI, kg/m²",
+            gravida ~ "Gravida",
+            parite ~ "Parite",
+            abortus ~ "Abortus",
+            nsd ~ "NSD sayısı",
+            cs ~ "C/S sayısı",
+            menopoz_grup ~ "Menopoz durumu",
+            sigara_grup ~ "Sigara kullanımı"
+        )
+
+    )
+
+
+
+# =====================================================================
+# 34. p DEĞERLERİNİ EKLE
+# =====================================================================
+
+table1 <- table1 %>%
+
+    add_p(
+
+        test = list(
+            c(yas, bmi) ~ "t.test",
+            c(gravida, parite, abortus, nsd, cs) ~ "wilcox.test",
+            c(menopoz_grup, sigara_grup) ~ "fisher.test"
+        ),
+
+        pvalue_fun = function(x) {
+            style_pvalue(x, digits = 3)
+        }
+
+    )
+
+
+
+# =====================================================================
+# 35. DEĞİŞKEN İSİMLERİNİ KALIN YAP
+# =====================================================================
+
+table1 <- table1 %>% bold_labels()
+
+
+
+# =====================================================================
+# 36. BAŞLIKLARI DİNAMİK YAP
+# =====================================================================
+
+table1 <- table1 %>%
+
+    modify_header(
+        label ~ "**Özellik**",
+        all_stat_cols() ~ "**{level}**, N = {n}",
+        p.value ~ "**p değeri**"
+    ) %>%
+
+    modify_footnote(
+        all_stat_cols() ~ NA
+    )
+
+
+
+# =====================================================================
+# 37. TABLO BAŞLIĞI
+# =====================================================================
+
+table1 <- table1 %>%
+
+    modify_caption(
+        paste0(
+            "**Tablo 1. Histerektomi ve re-LEEP uygulanan ",
+            "hastaların demografik özelliklerinin karşılaştırılması** ",
+            "(Re-konizasyon uygulanan hastalar bu karşılaştırmaya ",
+            "dahil edilmemiştir)"
+        )
+    )
+
+
+
+# =====================================================================
+# 38. TABLOYU EKRANDA GÖSTER
+# =====================================================================
+
+table1
+
+
+
+# =====================================================================
+# 39. TABLO İÇ VERİSİNİ KONTROL ET
+# =====================================================================
+
+cat("\n")
+cat("============================================================\n")
+cat("TABLE 1 İÇ VERİSİ\n")
+cat("============================================================\n\n")
+
+print(as.data.frame(table1$table_body))
+
+
+
+# =====================================================================
+# 40. ÇIKTI DOSYA YOLLARI
+# =====================================================================
+
+html_yolu <- file.path(
+    ana_klasor,
+    "Table1_Histerektomi_vs_ReLEEP_Demografik.html"
+)
+
+word_yolu <- file.path(
+    ana_klasor,
+    "Table1_Histerektomi_vs_ReLEEP_Demografik.docx"
+)
+
+excel_yolu <- file.path(
+    ana_klasor,
+    "Table1_Histerektomi_vs_ReLEEP_Kontrol_Tablolari.xlsx"
+)
+
+temiz_veri_yolu <- file.path(
+    ana_klasor,
+    "Table1_Histerektomi_vs_ReLEEP_Temiz_Veri.xlsx"
+)
+
+
+
+# =====================================================================
+# 41. HTML KAYDET
+# =====================================================================
+
+table1_gt <- gtsummary::as_gt(table1)
+
+gt::gtsave(table1_gt, filename = html_yolu)
+
+
+
+# =====================================================================
+# 42. WORD KAYDET
+# =====================================================================
+
+table1_word <- gtsummary::as_flex_table(table1)
+
+flextable::save_as_docx("Table 1" = table1_word, path = word_yolu)
+
+
+
+# =====================================================================
+# 43. KONTROL TABLOLARINI EXCEL'E KAYDET
+# =====================================================================
+
+writexl::write_xlsx(
+
+    list(
+        "Eksik_Veri"             = as.data.frame(eksik_veri),
+        "Normalite"              = as.data.frame(normalite),
+        "Tekrar_Histerektomi"    = as.data.frame(tekrar_histerektomi),
+        "Tekrar_ReLEEP"          = as.data.frame(tekrar_releep),
+        "Ortak_Hastalar"         = data.frame(hasta_no = ortak_hastalar),
+        "Cikarilan_Rekonizasyon" = as.data.frame(
+            releep_konizasyon %>% select(hasta_no)
+        )
+    ),
+
+    path = excel_yolu
+
+)
+
+
+
+# =====================================================================
+# 44. TEMİZ BİRLEŞTİRİLMİŞ VERİYİ KAYDET
+# =====================================================================
+
+writexl::write_xlsx(
+    as.data.frame(analiz),
+    path = temiz_veri_yolu
+)
+
+
+
+# =====================================================================
+# 45. SON KONTROL
+# =====================================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("DEMOGRAFİK ANALİZ TAMAMLANDI (DÜZELTİLMİŞ)\n")
+cat("============================================================\n\n")
+
+cat("Histerektomi N =", sum(analiz$grup == "Histerektomi", na.rm = TRUE), "\n")
+cat("Re-LEEP N =", sum(analiz$grup == "Re-LEEP", na.rm = TRUE), "\n")
+cat("Toplam N =", nrow(analiz), "\n")
+cat(
+    "\n(Karşılaştırma dışı bırakılan Re-konizasyon hastası sayısı:",
+    nrow(releep_konizasyon), ")\n\n"
+)
+
+
+
+# =====================================================================
+# 46. DOSYALAR OLUŞTU MU?
+# =====================================================================
+
+cat("Word:", file.exists(word_yolu), "\n")
+cat("HTML:", file.exists(html_yolu), "\n")
+cat("Kontrol Excel:", file.exists(excel_yolu), "\n")
+cat("Temiz veri Excel:", file.exists(temiz_veri_yolu), "\n\n")
+
+
+
+# =====================================================================
+# 47. DOSYA YOLLARINI GÖSTER
+# =====================================================================
+
+cat("WORD:\n", word_yolu, "\n\n")
+cat("HTML:\n", html_yolu, "\n\n")
+cat("KONTROL EXCEL:\n", excel_yolu, "\n\n")
+cat("TEMİZ VERİ:\n", temiz_veri_yolu, "\n\n")
+
+
+
+# =====================================================================
+# 48. SESSION INFO
+# =====================================================================
+
+sessionInfo()
+
+
+
+# =====================================================================
+# =====================================================================
+#
+#                         ANALİZ BİTTİ
+#
+# =====================================================================
+# =====================================================================
