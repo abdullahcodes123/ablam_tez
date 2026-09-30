@@ -1,0 +1,2257 @@
+# =====================================================================
+# =====================================================================
+#
+#     LEEP ÇALIŞMASI
+#
+#     2. ANALİZ - DÜZELTİLMİŞ FİNAL SÜRÜM (v2)
+#
+#     İLK LEEP İLE RE-EKSİZYON ARASINDA GEÇEN SÜRENİN
+#     REZİDÜ HASTALIK İLE İLİŞKİSİ
+#
+# =====================================================================
+# =====================================================================
+#
+# ÖNEMLİ:
+#
+# Veri kontrolünde:
+#
+# İlk LEEP tarihlerinin      60/60'ı ayın 1. günü
+# Re-eksizyon tarihlerinin   60/60'ı ayın 1. günü
+#
+# olarak bulunmuştur.
+#
+# Bu nedenle tarih verisi gün düzeyinde değil,
+# AY/YIL düzeyinde değerlendirilmelidir.
+#
+# Bu analizde:
+#
+# Süre = iki işlem arasındaki TAM TAKVİM AYI farkı
+#
+# Örnek:
+#
+# İlk LEEP:       Mayıs 2025
+# Re-eksizyon:    Eylül 2025
+#
+# Süre = 4 ay
+#
+#
+# ANA ANALİZLER:
+#
+# 1. Rezidü negatif ve pozitif gruplarda süre
+#    Medyan (Q1-Q3)
+#
+# 2. Mann-Whitney U testi
+#
+# 3. Binary lojistik regresyon
+#
+#    Rezidü hastalık ~ süre (ay)
+#
+# 4. Her 1 aylık artış için:
+#
+#    OR
+#    %95 Güven Aralığı
+#    p değeri
+#
+# ---------------------------------------------------------------------
+# BU SÜRÜMDE (v2) YAPILAN DEĞİŞİKLİK:
+#
+# Bölüm 10'da tarih dönüştürme artık:
+#
+#   as.Date(ilk_leep_tarihi, tz = "UTC")
+#
+# şeklinde, AÇIKÇA "tz = UTC" belirtilerek yapılıyor.
+#
+# NEDEN:
+#
+# readxl paketi Excel tarihlerini UTC varsayarak okur ve
+# POSIXct nesnesine "tzone = UTC" etiketi ekler. as.Date()
+# normalde bu etiketi okuyup korur - ama bunu ELLE ve AÇIKÇA
+# belirtmek, sistem saat diliminden (bu bilgisayarda
+# "America/Chicago") bağımsız, HER ZAMAN garantili bir sonuç
+# verir.
+#
+# Bu özellikle KRİTİK, çünkü verideki HER tarih ayın tam
+# 1. günü saat 00:00 - yani olası bir saat dilimi kayması
+# senaryosunda en riskli durum tam da budur (gece yarısı bir
+# önceki güne/aya kayabilir). tz = "UTC" eklemek bu riski
+# sıfıra indiriyor.
+#
+# Ayrıca Bölüm 12'nin hemen altına, dönüşümün gerçekten doğru
+# çalıştığını gösteren KÜÇÜK BİR DOĞRULAMA BLOĞU eklendi
+# (Bölüm 12b): ham Excel ayı ile as.Date() sonrası ay
+# karşılaştırılıyor, ikisiör-tüşmezse script SİZE HABER VERİYOR.
+# =====================================================================
+
+
+
+# =====================================================================
+# 1. R ORTAMINI TEMİZLE
+# =====================================================================
+
+rm(list = ls())
+
+graphics.off()
+
+
+
+# =====================================================================
+# 2. GEREKLİ PAKETLER
+# =====================================================================
+
+library(readxl)
+
+library(dplyr)
+
+library(ggplot2)
+
+library(gtsummary)
+
+library(gt)
+
+library(writexl)
+
+library(broom)
+
+
+
+# =====================================================================
+# 3. DOSYA YOLU
+# =====================================================================
+
+leep_yolu <-
+  "/Users/abdullah/Desktop/ablam tez/leep_tlh.xlsx"
+
+
+
+# =====================================================================
+# 4. DOSYA VAR MI?
+# =====================================================================
+
+if (!file.exists(leep_yolu)) {
+
+  stop(
+    "Dosya bulunamadı: ", leep_yolu,
+    "\nLütfen 'leep_yolu' değişkenini kontrol edin."
+  )
+
+}
+
+
+
+# =====================================================================
+# 5. EXCEL DOSYASINI OKU
+# =====================================================================
+#
+# Gerçek değişken isimleri Excel'in ikinci satırında olduğu için
+# ilk satırı atlıyoruz.
+# =====================================================================
+
+leep_raw <- read_excel(
+
+  path = leep_yolu,
+
+  sheet = "Sayfa1",
+
+  skip = 1
+
+)
+
+
+
+# =====================================================================
+# 6. VERİ BOYUTUNU KONTROL ET
+# =====================================================================
+
+dim(leep_raw)
+
+
+# Beklenen:
+#
+# 60 34
+
+
+
+# =====================================================================
+# 7. ANALİZ KOPYASI OLUŞTUR
+# =====================================================================
+
+analiz <- leep_raw
+
+
+
+# =====================================================================
+# 8. DEĞİŞKEN İSİMLERİNİ DÜZENLE
+# =====================================================================
+#
+# İlk demografik analizde kullandığımız isimlendirme ile
+# tamamen aynı yapıyı koruyoruz.
+# =====================================================================
+
+names(analiz)[1]  <- "hasta_no"
+
+names(analiz)[2]  <- "yas"
+
+names(analiz)[3]  <- "bmi"
+
+names(analiz)[4]  <- "gravida"
+
+names(analiz)[5]  <- "parite"
+
+names(analiz)[6]  <- "abortus"
+
+names(analiz)[7]  <- "nsd"
+
+names(analiz)[8]  <- "cs"
+
+names(analiz)[9]  <- "menopoz"
+
+names(analiz)[10] <- "leep_konizasyon"
+
+names(analiz)[11] <- "ilk_leep_tarihi"
+
+names(analiz)[12] <- "eksen_3_9"
+
+names(analiz)[13] <- "eksen_6_12"
+
+names(analiz)[14] <- "kalinlik"
+
+names(analiz)[15] <- "materyal_butunlugu"
+
+names(analiz)[16] <- "parca_sayisi"
+
+names(analiz)[17] <- "termal_artefakt"
+
+names(analiz)[18] <- "ilk_leep_patoloji"
+
+names(analiz)[19] <- "ecc"
+
+names(analiz)[20] <- "glanduler_tutulum"
+
+names(analiz)[21] <- "cerrahi_sinir"
+
+names(analiz)[22] <- "sinir_pozitif_yeri"
+
+names(analiz)[23] <- "ki67"
+
+names(analiz)[24] <- "p16"
+
+names(analiz)[25] <- "reeksizyon_yontemi"
+
+names(analiz)[26] <- "reeksizyon_tarihi"
+
+names(analiz)[27] <- "rezidu"
+
+names(analiz)[28] <- "rezidu_derecesi"
+
+names(analiz)[29] <- "reeksizyon_cerrahi_sinir"
+
+names(analiz)[30] <- "reeksizyon_glanduler_tutulum"
+
+names(analiz)[31] <- "notlar"
+
+names(analiz)[32] <- "sigara"
+
+names(analiz)[33] <- "paket_yil"
+
+names(analiz)[34] <- "diger"
+
+
+
+# =====================================================================
+# 9. İSİMLERİ KONTROL ET
+# =====================================================================
+
+names(analiz)
+
+
+
+# =====================================================================
+# 10. TARİHLERİ DATE FORMATINA ÇEVİR (v2: tz = "UTC" ile GÜVENLİ)
+# =====================================================================
+#
+# ESKİ SÜRÜM:
+#
+#   as.Date(ilk_leep_tarihi)
+#
+# Bu, sistem saat dilimine (burada "America/Chicago") bağımlı
+# çalışabilirdi.
+#
+# YENİ SÜRÜM:
+#
+#   as.Date(ilk_leep_tarihi, tz = "UTC")
+#
+# readxl'in Excel tarihlerini okurken varsaydığı saat dilimiyle
+# (UTC) birebir eşleşiyor. Böylece hangi bilgisayarda/hangi
+# saat diliminde çalıştırılırsa çalıştırılsın SONUÇ HER ZAMAN
+# AYNI olur.
+# =====================================================================
+
+analiz <- analiz %>%
+
+  mutate(
+
+    ilk_leep_tarihi_ham =
+      ilk_leep_tarihi,
+
+    reeksizyon_tarihi_ham =
+      reeksizyon_tarihi,
+
+
+    ilk_leep_tarihi =
+      as.Date(
+        ilk_leep_tarihi,
+        tz = "UTC"
+      ),
+
+    reeksizyon_tarihi =
+      as.Date(
+        reeksizyon_tarihi,
+        tz = "UTC"
+      ),
+
+    rezidu =
+      suppressWarnings(
+        as.numeric(rezidu)
+      )
+
+  )
+
+
+
+# =====================================================================
+# 11. TARİHLERİ KONTROL ET
+# =====================================================================
+
+head(
+  analiz$ilk_leep_tarihi,
+  10
+)
+
+
+head(
+  analiz$reeksizyon_tarihi,
+  10
+)
+
+
+
+# =====================================================================
+# 12. TARİH HASSASİYETİNİ TEKRAR KONTROL ET
+# =====================================================================
+
+ilk_leep_ayin_biri <- sum(
+
+  format(
+    analiz$ilk_leep_tarihi,
+    "%d"
+  ) == "01",
+
+  na.rm = TRUE
+
+)
+
+
+reeksizyon_ayin_biri <- sum(
+
+  format(
+    analiz$reeksizyon_tarihi,
+    "%d"
+  ) == "01",
+
+  na.rm = TRUE
+
+)
+
+
+cat(
+  "\nİlk LEEP tarihinde ayın 1. günü olan kayıt:",
+  ilk_leep_ayin_biri,
+  "/",
+  sum(!is.na(analiz$ilk_leep_tarihi)),
+  "\n"
+)
+
+
+cat(
+  "Re-eksizyon tarihinde ayın 1. günü olan kayıt:",
+  reeksizyon_ayin_biri,
+  "/",
+  sum(!is.na(analiz$reeksizyon_tarihi)),
+  "\n"
+)
+
+
+
+# =====================================================================
+# 12b. tz = "UTC" DÜZELTMESİNİN GERÇEKTEN İŞE YARADIĞINI DOĞRULA (YENİ)
+# =====================================================================
+#
+# Ham (dönüştürülmemiş) tarihten çıkardığımız ay/yıl ile,
+# as.Date(..., tz="UTC") sonrası çıkardığımız ay/yıl'ı
+# karşılaştırıyoruz. Bir saat dilimi kayması olsaydı, bu iki
+# değer BİRBİRİNDEN FARKLI çıkardı.
+#
+# Beklenen: UYUŞMAYAN KAYIT SAYISI = 0
+# =====================================================================
+
+kontrol_ilk <- analiz %>%
+
+  mutate(
+
+    ham_ay_yil =
+      format(
+        ilk_leep_tarihi_ham,
+        "%Y-%m"
+      ),
+
+    yeni_ay_yil =
+      format(
+        ilk_leep_tarihi,
+        "%Y-%m"
+      )
+
+  ) %>%
+
+  filter(
+    !is.na(ham_ay_yil),
+    ham_ay_yil != yeni_ay_yil
+  ) %>%
+
+  select(
+
+    hasta_no,
+
+    ilk_leep_tarihi_ham,
+
+    ham_ay_yil,
+
+    yeni_ay_yil
+
+  )
+
+
+kontrol_re <- analiz %>%
+
+  mutate(
+
+    ham_ay_yil =
+      format(
+        reeksizyon_tarihi_ham,
+        "%Y-%m"
+      ),
+
+    yeni_ay_yil =
+      format(
+        reeksizyon_tarihi,
+        "%Y-%m"
+      )
+
+  ) %>%
+
+  filter(
+    !is.na(ham_ay_yil),
+    ham_ay_yil != yeni_ay_yil
+  ) %>%
+
+  select(
+
+    hasta_no,
+
+    reeksizyon_tarihi_ham,
+
+    ham_ay_yil,
+
+    yeni_ay_yil
+
+  )
+
+
+cat("\n")
+cat("============================================\n")
+cat("SAAT DİLİMİ (tz) GÜVENLİK KONTROLÜ\n")
+cat("============================================\n")
+
+cat(
+  "İlk LEEP - uyuşmayan kayıt sayısı:",
+  nrow(kontrol_ilk),
+  "(0 olmalı)\n"
+)
+
+cat(
+  "Re-eksizyon - uyuşmayan kayıt sayısı:",
+  nrow(kontrol_re),
+  "(0 olmalı)\n"
+)
+
+
+if (nrow(kontrol_ilk) > 0 || nrow(kontrol_re) > 0) {
+
+  cat(
+    "\nUYARI: Saat dilimi kayması tespit edildi!",
+    "\nAşağıdaki hastaların tarihlerini elle kontrol edin:\n"
+  )
+
+  print(kontrol_ilk)
+
+  print(kontrol_re)
+
+} else {
+
+  cat(
+    "\nSonuç: Saat dilimi kayması YOK.",
+    "tz = 'UTC' düzeltmesi doğrulandı.\n"
+  )
+
+}
+
+
+# Artık ham kopyalara ihtiyacımız yok, veri setini sadeleştirelim
+
+analiz <- analiz %>%
+
+  select(
+    -ilk_leep_tarihi_ham,
+    -reeksizyon_tarihi_ham
+  )
+
+
+
+# =====================================================================
+# 13. YIL VE AY BİLGİLERİNİ AYIR
+# =====================================================================
+#
+# Örneğin:
+#
+# 2025-05-01
+#
+# için:
+#
+# yıl = 2025
+# ay  = 5
+#
+# =====================================================================
+
+analiz <- analiz %>%
+
+  mutate(
+
+    ilk_leep_yil =
+      as.integer(
+        format(
+          ilk_leep_tarihi,
+          "%Y"
+        )
+      ),
+
+    ilk_leep_ay =
+      as.integer(
+        format(
+          ilk_leep_tarihi,
+          "%m"
+        )
+      ),
+
+
+    reeksizyon_yil =
+      as.integer(
+        format(
+          reeksizyon_tarihi,
+          "%Y"
+        )
+      ),
+
+    reeksizyon_ay =
+      as.integer(
+        format(
+          reeksizyon_tarihi,
+          "%m"
+        )
+      )
+
+  )
+
+
+
+# =====================================================================
+# 14. İKİ İŞLEM ARASINDAKİ AY FARKINI HESAPLA
+# =====================================================================
+#
+# FORMÜL:
+#
+# (Re-eksizyon yılı - İlk LEEP yılı) × 12
+#
+# +
+#
+# (Re-eksizyon ayı - İlk LEEP ayı)
+#
+#
+# ÖRNEK:
+#
+# Mayıs 2025 -> Eylül 2025
+#
+# (2025 - 2025) × 12 + (9 - 5)
+#
+# = 4 ay
+#
+# =====================================================================
+
+analiz <- analiz %>%
+
+  mutate(
+
+    sure_ay =
+
+      (
+        reeksizyon_yil -
+          ilk_leep_yil
+      ) * 12 +
+
+      (
+        reeksizyon_ay -
+          ilk_leep_ay
+      )
+
+  )
+
+
+
+# =====================================================================
+# 15. HESAPLANAN SÜREYİ KONTROL ET
+# =====================================================================
+
+summary(
+  analiz$sure_ay
+)
+
+
+table(
+  analiz$sure_ay,
+  useNA = "ifany"
+)
+
+
+
+# =====================================================================
+# 16. NEGATİF SÜRE VAR MI?
+# =====================================================================
+
+sum(
+  analiz$sure_ay < 0,
+  na.rm = TRUE
+)
+
+
+# 0 çıkmasını bekliyoruz.
+
+
+
+# =====================================================================
+# 17. SIFIR AY VAR MI?
+# =====================================================================
+#
+# Aynı takvim ayında yapılan işlem varsa 0 olarak görünür.
+# =====================================================================
+
+sum(
+  analiz$sure_ay == 0,
+  na.rm = TRUE
+)
+
+
+
+# =====================================================================
+# 18. SÜRE DAĞILIMINI KONTROL ET
+# =====================================================================
+
+sort(
+  unique(
+    analiz$sure_ay
+  )
+)
+
+
+
+# =====================================================================
+# 19. REZİDÜ KODLAMASINI KONTROL ET
+# =====================================================================
+
+table(
+  analiz$rezidu,
+  useNA = "ifany"
+)
+
+
+# Mevcut veride:
+#
+# 0    = 31
+# 1    = 27
+# 2    = 1
+# NA   = 1
+#
+# bulunmaktadır.
+#
+# Kod kitabına göre yalnızca 0 ve 1 geçerli olduğu için
+# 2 kodlu kayıt ana analize alınmayacaktır.
+
+
+
+# =====================================================================
+# 20. GEÇERSİZ REZİDÜ KODLARINI KONTROL ET
+# =====================================================================
+
+gecersiz_rezidu <- analiz %>%
+
+  mutate(
+    satir_no = row_number()
+  ) %>%
+
+  filter(
+
+    !is.na(rezidu),
+
+    !(rezidu %in% c(0, 1))
+
+  ) %>%
+
+  select(
+
+    satir_no,
+
+    hasta_no,
+
+    rezidu,
+
+    notlar
+
+  )
+
+
+gecersiz_rezidu
+
+
+
+# =====================================================================
+# 21. REZİDÜ GRUBUNU TÜRKÇE ETİKETLE
+# =====================================================================
+
+analiz <- analiz %>%
+
+  mutate(
+
+    rezidu_grup = case_when(
+
+      rezidu == 0 ~
+        "Rezidü negatif",
+
+      rezidu == 1 ~
+        "Rezidü pozitif",
+
+      TRUE ~
+        NA_character_
+
+    )
+
+  )
+
+
+
+# =====================================================================
+# 22. REZİDÜ GRUBUNU FACTOR YAP
+# =====================================================================
+
+analiz$rezidu_grup <- factor(
+
+  analiz$rezidu_grup,
+
+  levels = c(
+
+    "Rezidü negatif",
+
+    "Rezidü pozitif"
+
+  )
+
+)
+
+
+
+# =====================================================================
+# 23. GRUP SAYILARINI KONTROL ET
+# =====================================================================
+
+table(
+  analiz$rezidu_grup,
+  useNA = "ifany"
+)
+
+
+
+# =====================================================================
+# 24. ANA ANALİZ VERİ SETİNİ OLUŞTUR
+# =====================================================================
+#
+# Analize alınması için:
+#
+# 1. Rezidü sonucu 0 veya 1 olmalı
+# 2. Süre hesaplanabilmeli
+# 3. Süre negatif olmamalı
+#
+# =====================================================================
+
+sure_analiz <- analiz %>%
+
+  filter(
+
+    !is.na(rezidu_grup),
+
+    !is.na(sure_ay),
+
+    sure_ay >= 0
+
+  )
+
+
+
+# =====================================================================
+# 25. ANALİZ ÖRNEKLEMİNİ KONTROL ET
+# =====================================================================
+
+nrow(
+  sure_analiz
+)
+
+
+table(
+  sure_analiz$rezidu_grup
+)
+
+
+# Beklenen:
+#
+# Toplam = 58
+#
+# Rezidü negatif = 31
+#
+# Rezidü pozitif = 27
+
+
+
+# =====================================================================
+# 26. GENEL SÜRE İSTATİSTİKLERİ
+# =====================================================================
+
+genel_sure <- sure_analiz %>%
+
+  summarise(
+
+    N =
+      n(),
+
+    Ortalama =
+      mean(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    SS =
+      sd(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    Medyan =
+      median(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    Q1 =
+      quantile(
+        sure_ay,
+        0.25,
+        na.rm = TRUE
+      ),
+
+    Q3 =
+      quantile(
+        sure_ay,
+        0.75,
+        na.rm = TRUE
+      ),
+
+    Minimum =
+      min(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    Maksimum =
+      max(
+        sure_ay,
+        na.rm = TRUE
+      )
+
+  )
+
+
+genel_sure
+
+
+
+# =====================================================================
+# 27. REZİDÜ GRUPLARINA GÖRE TANIMLAYICI İSTATİSTİKLER
+# =====================================================================
+
+sure_tanimlayici <- sure_analiz %>%
+
+  group_by(
+    rezidu_grup
+  ) %>%
+
+  summarise(
+
+    N =
+      n(),
+
+    Ortalama =
+      mean(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    SS =
+      sd(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    Medyan =
+      median(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    Q1 =
+      quantile(
+        sure_ay,
+        0.25,
+        na.rm = TRUE
+      ),
+
+    Q3 =
+      quantile(
+        sure_ay,
+        0.75,
+        na.rm = TRUE
+      ),
+
+    Minimum =
+      min(
+        sure_ay,
+        na.rm = TRUE
+      ),
+
+    Maksimum =
+      max(
+        sure_ay,
+        na.rm = TRUE
+      )
+
+  )
+
+
+sure_tanimlayici
+
+
+
+# =====================================================================
+# 28. NORMAL DAĞILIM KONTROLÜ
+# =====================================================================
+
+shapiro_negatif <- shapiro.test(
+
+  sure_analiz$sure_ay[
+
+    sure_analiz$rezidu_grup ==
+      "Rezidü negatif"
+
+  ]
+
+)
+
+
+shapiro_pozitif <- shapiro.test(
+
+  sure_analiz$sure_ay[
+
+    sure_analiz$rezidu_grup ==
+      "Rezidü pozitif"
+
+  ]
+
+)
+
+
+
+# =====================================================================
+# 29. SHAPIRO SONUÇLARINI GÖSTER
+# =====================================================================
+
+shapiro_negatif
+
+shapiro_pozitif
+
+
+
+# =====================================================================
+# 30. SHAPIRO SONUÇ TABLOSU
+# =====================================================================
+
+shapiro_sonuclari <- data.frame(
+
+  Grup = c(
+
+    "Rezidü negatif",
+
+    "Rezidü pozitif"
+
+  ),
+
+  W = c(
+
+    unname(
+      shapiro_negatif$statistic
+    ),
+
+    unname(
+      shapiro_pozitif$statistic
+    )
+
+  ),
+
+  p_degeri = c(
+
+    shapiro_negatif$p.value,
+
+    shapiro_pozitif$p.value
+
+  )
+
+)
+
+
+shapiro_sonuclari
+
+
+
+# =====================================================================
+# 31. HİSTOGRAM
+# =====================================================================
+
+grafik_histogram <- ggplot(
+
+  sure_analiz,
+
+  aes(
+    x = sure_ay
+  )
+
+) +
+
+  geom_histogram(
+
+    binwidth = 1,
+
+    boundary = -0.5
+
+  ) +
+
+  facet_wrap(
+
+    ~ rezidu_grup,
+
+    scales = "free_y"
+
+  ) +
+
+  labs(
+
+    title =
+      "Rezidü durumuna göre iki işlem arasındaki süre",
+
+    x =
+      "İlk LEEP ile re-eksizyon arasındaki süre (ay)",
+
+    y =
+      "Hasta sayısı"
+
+  ) +
+
+  theme_classic(
+    base_size = 12
+  )
+
+
+grafik_histogram
+
+
+
+# =====================================================================
+# 32. Q-Q GRAFİĞİ
+# =====================================================================
+
+grafik_qq <- ggplot(
+
+  sure_analiz,
+
+  aes(
+    sample = sure_ay
+  )
+
+) +
+
+  stat_qq() +
+
+  stat_qq_line() +
+
+  facet_wrap(
+    ~ rezidu_grup
+  ) +
+
+  labs(
+
+    title =
+      "İki işlem arasındaki sürenin Q-Q grafiği",
+
+    x =
+      "Teorik kantiller",
+
+    y =
+      "Gözlenen kantiller"
+
+  ) +
+
+  theme_classic(
+    base_size = 12
+  )
+
+
+grafik_qq
+
+
+
+# =====================================================================
+# 33. BOXPLOT
+# =====================================================================
+
+grafik_boxplot <- ggplot(
+
+  sure_analiz,
+
+  aes(
+
+    x = rezidu_grup,
+
+    y = sure_ay
+
+  )
+
+) +
+
+  geom_boxplot() +
+
+  labs(
+
+    title =
+      "Rezidü durumuna göre iki işlem arasındaki süre",
+
+    x =
+      "Rezidü durumu",
+
+    y =
+      "İlk LEEP ile re-eksizyon arasındaki süre (ay)"
+
+  ) +
+
+  theme_classic(
+    base_size = 12
+  )
+
+
+grafik_boxplot
+
+
+
+# =====================================================================
+# 34. ANA GRUP KARŞILAŞTIRMASI
+#
+# MANN-WHITNEY U TESTİ
+# =====================================================================
+#
+# Önceki analizde her iki grupta da Shapiro-Wilk testi
+# anlamlı bulunmuştu.
+#
+# Ayrıca süre değişkeni ay cinsinden ayrık ve sağa çarpık
+# bir dağılım gösterebilir.
+#
+# Bu nedenle ana grup karşılaştırmasında Mann-Whitney U
+# kullanıyoruz.
+#
+# ties bulunması beklenir; çünkü süre artık tam ay olarak
+# hesaplanmaktadır.
+#
+# Bu nedenle exact = FALSE kullanıyoruz.
+# =====================================================================
+
+mann_whitney_sonuc <- wilcox.test(
+
+  sure_ay ~ rezidu_grup,
+
+  data = sure_analiz,
+
+  exact = FALSE
+
+)
+
+
+mann_whitney_sonuc
+
+
+
+# =====================================================================
+# 35. p DEĞERİNİ AYRI KAYDET
+# =====================================================================
+
+mann_whitney_p <-
+  mann_whitney_sonuc$p.value
+
+
+mann_whitney_p
+
+
+
+# =====================================================================
+# 36. TABLE 2
+# =====================================================================
+#
+# Table 1 ile benzer görünüm:
+#
+# Özellik
+# Rezidü negatif (n=31)
+# Rezidü pozitif (n=27)
+# p değeri
+#
+# Süre:
+#
+# Medyan (Q1-Q3)
+#
+# =====================================================================
+
+n_negatif <- sum(
+
+  sure_analiz$rezidu_grup ==
+    "Rezidü negatif"
+
+)
+
+
+n_pozitif <- sum(
+
+  sure_analiz$rezidu_grup ==
+    "Rezidü pozitif"
+
+)
+
+
+
+table2 <- sure_analiz %>%
+
+  select(
+
+    rezidu_grup,
+
+    sure_ay
+
+  ) %>%
+
+  tbl_summary(
+
+    by =
+      rezidu_grup,
+
+    type = list(
+
+      sure_ay ~
+        "continuous"
+
+    ),
+
+    statistic = list(
+
+      sure_ay ~
+        "{median} ({p25}–{p75})"
+
+    ),
+
+    digits = list(
+
+      sure_ay ~
+        1
+
+    ),
+
+    missing =
+      "no",
+
+    label = list(
+
+      sure_ay ~
+        "İlk LEEP ile re-eksizyon arasındaki süre, ay"
+
+    )
+
+  )
+
+
+
+# =====================================================================
+# 37. p DEĞERİNİ EKLE
+# =====================================================================
+#
+# exact = FALSE kullanılması için test.args belirtiyoruz.
+# Böylece ties uyarısı problem oluşturmaz ve Table 2'deki p
+# değeri, elle hesapladığımız mann_whitney_p ile birebir aynı
+# yöntemle üretilmiş olur.
+# =====================================================================
+
+table2 <- table2 %>%
+
+  add_p(
+
+    test = list(
+
+      sure_ay ~
+        "wilcox.test"
+
+    ),
+
+    test.args = list(
+
+      sure_ay ~
+        list(
+          exact = FALSE
+        )
+
+    ),
+
+    pvalue_fun = function(x) {
+
+      style_pvalue(
+
+        x,
+
+        digits = 3
+
+      )
+
+    }
+
+  )
+
+
+
+# =====================================================================
+# 38. TABLE 2 BAŞLIKLARINI TÜRKÇELEŞTİR
+# =====================================================================
+#
+# n_negatif / n_pozitif veriden hesaplanmış değişkenler -
+# elle yazılmış sabit sayı DEĞİL. Veri değişirse bu başlıklar
+# otomatik doğru kalır.
+# =====================================================================
+
+table2 <- table2 %>%
+
+  bold_labels() %>%
+
+  bold_p(
+    t = 0.05
+  ) %>%
+
+  modify_header(
+
+    label ~
+      "**Özellik**",
+
+    stat_1 ~
+      paste0(
+        "**Rezidü negatif (n=",
+        n_negatif,
+        ")**"
+      ),
+
+    stat_2 ~
+      paste0(
+        "**Rezidü pozitif (n=",
+        n_pozitif,
+        ")**"
+      ),
+
+    p.value ~
+      "**p değeri**"
+
+  ) %>%
+
+  modify_caption(
+
+    "**Tablo 2. İlk LEEP ile re-eksizyon arasında geçen sürenin rezidü hastalık durumuna göre karşılaştırılması**"
+
+  )
+
+
+
+# =====================================================================
+# 39. TABLE 2'Yİ GÖSTER
+# =====================================================================
+
+table2
+
+
+
+# =====================================================================
+# 40. TABLE 2'NİN İÇERİĞİNİ KONTROL ET
+# =====================================================================
+
+table2$table_body
+
+
+
+# =====================================================================
+# =====================================================================
+#
+#               BINARY LOJİSTİK REGRESYON
+#
+# =====================================================================
+# =====================================================================
+#
+# BAĞIMLI DEĞİŞKEN:
+#
+# rezidu
+#
+# 0 = Rezidü negatif
+# 1 = Rezidü pozitif
+#
+#
+# BAĞIMSIZ DEĞİŞKEN:
+#
+# sure_ay
+#
+# Her 1 aylık artış için OR hesaplanacaktır.
+#
+# =====================================================================
+
+
+
+# =====================================================================
+# 41. OUTCOME KONTROLÜ
+# =====================================================================
+
+table(
+  sure_analiz$rezidu
+)
+
+
+
+# =====================================================================
+# 42. LOJİSTİK REGRESYON MODELİ
+# =====================================================================
+
+model_sure_ay <- glm(
+
+  rezidu ~ sure_ay,
+
+  data = sure_analiz,
+
+  family = binomial(
+    link = "logit"
+  )
+
+)
+
+
+
+# =====================================================================
+# 43. MODEL ÖZETİ
+# =====================================================================
+
+summary(
+  model_sure_ay
+)
+
+
+
+# =====================================================================
+# 44. OR + %95 GA + p DEĞERİ
+# =====================================================================
+
+lojistik_ham <- tidy(
+
+  model_sure_ay,
+
+  exponentiate = TRUE,
+
+  conf.int = TRUE
+
+)
+
+
+lojistik_ham
+
+
+
+# =====================================================================
+# 45. SADECE SÜRE SONUCUNU AL
+# =====================================================================
+
+lojistik_sonuc <- lojistik_ham %>%
+
+  filter(
+    term == "sure_ay"
+  ) %>%
+
+  transmute(
+
+    Degisken =
+      "İki işlem arasındaki süre (her 1 aylık artış)",
+
+    OR =
+      estimate,
+
+    GA_95_alt =
+      conf.low,
+
+    GA_95_ust =
+      conf.high,
+
+    p_degeri =
+      p.value
+
+  )
+
+
+lojistik_sonuc
+
+
+
+# =====================================================================
+# 46. YAYINA UYGUN SONUÇ TABLOSU
+# =====================================================================
+
+lojistik_sonuc_yayin <- lojistik_sonuc %>%
+
+  transmute(
+
+    `Değişken` =
+      Degisken,
+
+    `OR` =
+      sprintf(
+        "%.2f",
+        OR
+      ),
+
+    `%95 GA` =
+      paste0(
+
+        sprintf(
+          "%.2f",
+          GA_95_alt
+        ),
+
+        "–",
+
+        sprintf(
+          "%.2f",
+          GA_95_ust
+        )
+
+      ),
+
+    `p değeri` =
+      ifelse(
+
+        p_degeri < 0.001,
+
+        "<0.001",
+
+        sprintf(
+          "%.3f",
+          p_degeri
+        )
+
+      )
+
+  )
+
+
+lojistik_sonuc_yayin
+
+
+
+# =====================================================================
+# 47. LOJİSTİK REGRESYON TABLOSUNU GT İLE HAZIRLA
+# =====================================================================
+#
+# Burada tbl_regression() KULLANMIYORUZ.
+#
+# Böylece broom.helpers paketine ihtiyaç kalmıyor.
+# =====================================================================
+
+lojistik_tablo_gt <- lojistik_sonuc_yayin %>%
+
+  gt() %>%
+
+  tab_header(
+
+    title =
+      md(
+        "**Tablo 3. İlk LEEP ile re-eksizyon arasında geçen sürenin rezidü hastalık ile ilişkisi**"
+      ),
+
+    subtitle =
+      "Tek değişkenli binary lojistik regresyon"
+
+  ) %>%
+
+  cols_label(
+
+    `Değişken` =
+      md("**Değişken**"),
+
+    `OR` =
+      md("**OR**"),
+
+    `%95 GA` =
+      md("**%95 GA**"),
+
+    `p değeri` =
+      md("**p değeri**")
+
+  ) %>%
+
+  tab_source_note(
+
+    source_note =
+      "OR: Odds oranı; GA: Güven aralığı. OR, iki işlem arasındaki sürede her 1 aylık artış için verilmiştir."
+
+  )
+
+
+
+# =====================================================================
+# 48. LOJİSTİK REGRESYON TABLOSUNU GÖSTER
+# =====================================================================
+
+lojistik_tablo_gt
+
+
+
+# =====================================================================
+# 49. MODELDE KAÇ HASTA VAR?
+# =====================================================================
+
+nobs(
+  model_sure_ay
+)
+
+
+
+# =====================================================================
+# 50. MODEL UYUM BİLGİLERİ
+# =====================================================================
+
+AIC(
+  model_sure_ay
+)
+
+
+logLik(
+  model_sure_ay
+)
+
+
+
+# =====================================================================
+# 51. LOJİSTİK REGRESYON GRAFİĞİ
+# =====================================================================
+
+grafik_lojistik <- ggplot(
+
+  sure_analiz,
+
+  aes(
+
+    x = sure_ay,
+
+    y = rezidu
+
+  )
+
+) +
+
+  geom_jitter(
+
+    height = 0.04,
+
+    width = 0.08
+
+  ) +
+
+  stat_smooth(
+
+    method = "glm",
+
+    method.args = list(
+
+      family = binomial(
+        link = "logit"
+      )
+
+    ),
+
+    se = TRUE
+
+  ) +
+
+  scale_y_continuous(
+
+    breaks = c(
+      0,
+      1
+    ),
+
+    labels = c(
+
+      "Rezidü negatif",
+
+      "Rezidü pozitif"
+
+    )
+
+  ) +
+
+  labs(
+
+    title =
+      "İki işlem arasındaki süre ile rezidü hastalık arasındaki ilişki",
+
+    x =
+      "İlk LEEP ile re-eksizyon arasındaki süre (ay)",
+
+    y =
+      "Rezidü hastalık durumu"
+
+  ) +
+
+  theme_classic(
+    base_size = 12
+  )
+
+
+grafik_lojistik
+
+
+
+# =====================================================================
+# 52. ANA SONUÇLARI EKRANA YAZDIR
+# =====================================================================
+
+cat(
+  "\n",
+  "============================================================\n",
+  "2. ANALİZ SONUÇLARI\n",
+  "============================================================\n"
+)
+
+
+cat(
+  "\nAnalize alınan hasta sayısı:",
+  nrow(sure_analiz),
+  "\n"
+)
+
+
+cat(
+  "\nRezidü negatif:",
+  n_negatif,
+  "\n"
+)
+
+
+cat(
+  "Rezidü pozitif:",
+  n_pozitif,
+  "\n"
+)
+
+
+if (nrow(gecersiz_rezidu) > 0) {
+
+  cat(
+    "\nNOT:", nrow(gecersiz_rezidu),
+    "hasta geçersiz rezidü kodu nedeniyle analiz dışı bırakıldı.\n"
+  )
+
+}
+
+
+
+# =====================================================================
+# 53. GRUPLARA GÖRE MEDYANLARI YAZDIR
+# =====================================================================
+
+print(
+  sure_tanimlayici
+)
+
+
+
+# =====================================================================
+# 54. MANN-WHITNEY SONUCUNU YAZDIR
+# =====================================================================
+
+cat(
+  "\nMann-Whitney U testi p değeri:",
+  round(
+    mann_whitney_p,
+    4
+  ),
+  "\n"
+)
+
+
+
+# =====================================================================
+# 55. LOJİSTİK REGRESYON SONUCUNU YAZDIR
+# =====================================================================
+
+cat(
+  "\nHer 1 aylık süre artışı için OR:",
+  round(
+    lojistik_sonuc$OR,
+    2
+  ),
+  "\n"
+)
+
+
+cat(
+  "%95 GA:",
+  round(
+    lojistik_sonuc$GA_95_alt,
+    2
+  ),
+  "–",
+  round(
+    lojistik_sonuc$GA_95_ust,
+    2
+  ),
+  "\n"
+)
+
+
+cat(
+  "p değeri:",
+  round(
+    lojistik_sonuc$p_degeri,
+    4
+  ),
+  "\n"
+)
+
+
+
+# =====================================================================
+# 56. SONUÇ YÖNÜNÜ OTOMATİK AÇIKLA
+# =====================================================================
+#
+# Bu yalnızca yönü tarif eder.
+# Nedensellik iddiasında bulunmaz.
+# =====================================================================
+
+if (lojistik_sonuc$OR > 1) {
+
+  cat(
+    "\nOR 1'in üzerindedir; süre arttıkça rezidü hastalık odds'u",
+    "\nartış yönündedir.\n"
+  )
+
+} else if (lojistik_sonuc$OR < 1) {
+
+  cat(
+    "\nOR 1'in altındadır; süre arttıkça rezidü hastalık odds'u",
+    "\nazalış yönündedir.\n"
+  )
+
+} else {
+
+  cat(
+    "\nOR 1'e eşittir; süre ile rezidü hastalık odds'u arasında",
+    "\nyönlü bir ilişki görülmemektedir.\n"
+  )
+
+}
+
+
+
+# =====================================================================
+# 57. İSTATİSTİKSEL ANLAMLILIK AÇIKLAMASI
+# =====================================================================
+
+if (lojistik_sonuc$p_degeri < 0.05) {
+
+  cat(
+    "\nİlişki istatistiksel olarak anlamlıdır (p < 0.05).\n"
+  )
+
+} else {
+
+  cat(
+    "\nİlişki istatistiksel olarak anlamlı değildir (p >= 0.05).\n"
+  )
+
+}
+
+
+
+# =====================================================================
+# =====================================================================
+#
+#                       DOSYALARI KAYDET
+#
+# =====================================================================
+# =====================================================================
+
+
+
+# =====================================================================
+# 58. TABLE 2'Yİ HTML OLARAK KAYDET
+# =====================================================================
+
+table2_gt <- as_gt(
+  table2
+)
+
+
+gtsave(
+
+  table2_gt,
+
+  filename =
+    "/Users/abdullah/Desktop/ablam tez/Table2_sure_ay.html"
+
+)
+
+
+
+# =====================================================================
+# 59. LOJİSTİK TABLOYU HTML OLARAK KAYDET
+# =====================================================================
+
+gtsave(
+
+  lojistik_tablo_gt,
+
+  filename =
+    "/Users/abdullah/Desktop/ablam tez/Table3_sure_lojistik.html"
+
+)
+
+
+
+# =====================================================================
+# 60. TANIMLAYICI İSTATİSTİKLERİ EXCEL'E KAYDET
+# =====================================================================
+
+write_xlsx(
+
+  sure_tanimlayici,
+
+  "/Users/abdullah/Desktop/ablam tez/Sure_ay_tanimlayici.xlsx"
+
+)
+
+
+
+# =====================================================================
+# 61. LOJİSTİK REGRESYON SONUCUNU EXCEL'E KAYDET
+# =====================================================================
+
+write_xlsx(
+
+  lojistik_sonuc_yayin,
+
+  "/Users/abdullah/Desktop/ablam tez/Sure_ay_lojistik_regresyon.xlsx"
+
+)
+
+
+
+# =====================================================================
+# 62. NORMALİTE SONUÇLARINI KAYDET
+# =====================================================================
+
+write_xlsx(
+
+  shapiro_sonuclari,
+
+  "/Users/abdullah/Desktop/ablam tez/Sure_ay_normalite.xlsx"
+
+)
+
+
+
+# =====================================================================
+# 63. GRAFİKLERİ KAYDET
+# =====================================================================
+
+ggsave(
+
+  filename =
+    "/Users/abdullah/Desktop/ablam tez/Sure_ay_histogram.png",
+
+  plot =
+    grafik_histogram,
+
+  width = 8,
+
+  height = 5,
+
+  dpi = 300
+
+)
+
+
+ggsave(
+
+  filename =
+    "/Users/abdullah/Desktop/ablam tez/Sure_ay_QQ.png",
+
+  plot =
+    grafik_qq,
+
+  width = 8,
+
+  height = 5,
+
+  dpi = 300
+
+)
+
+
+ggsave(
+
+  filename =
+    "/Users/abdullah/Desktop/ablam tez/Sure_ay_boxplot.png",
+
+  plot =
+    grafik_boxplot,
+
+  width = 7,
+
+  height = 5,
+
+  dpi = 300
+
+)
+
+
+ggsave(
+
+  filename =
+    "/Users/abdullah/Desktop/ablam tez/Sure_ay_lojistik_grafik.png",
+
+  plot =
+    grafik_lojistik,
+
+  width = 8,
+
+  height = 5,
+
+  dpi = 300
+
+)
+
+
+
+# =====================================================================
+# 64. WORD İÇİN GEREKLİ PAKETLER
+# =====================================================================
+
+if (!requireNamespace("flextable", quietly = TRUE)) {
+
+  install.packages("flextable")
+
+}
+
+
+if (!requireNamespace("officer", quietly = TRUE)) {
+
+  install.packages("officer")
+
+}
+
+
+library(flextable)
+
+library(officer)
+
+
+
+# =====================================================================
+# 65. TABLE 2'Yİ WORD FORMATINA ÇEVİR
+# =====================================================================
+
+table2_word <- as_flex_table(
+  table2
+)
+
+
+
+# =====================================================================
+# 66. LOJİSTİK SONUÇ İÇİN WORD TABLOSU
+# =====================================================================
+
+lojistik_word <- flextable(
+  lojistik_sonuc_yayin
+)
+
+
+lojistik_word <- set_caption(
+
+  lojistik_word,
+
+  caption =
+    "Tablo 3. İlk LEEP ile re-eksizyon arasında geçen sürenin rezidü hastalık ile ilişkisi"
+
+)
+
+
+lojistik_word <- bold(
+
+  lojistik_word,
+
+  part = "header",
+
+  bold = TRUE
+
+)
+
+
+lojistik_word <- autofit(
+  lojistik_word
+)
+
+
+
+# =====================================================================
+# 67. TABLE 2 VE TABLE 3'Ü AYNI WORD DOSYASINA KAYDET
+# =====================================================================
+
+save_as_docx(
+
+  "Tablo 2 - Süre karşılaştırması" =
+    table2_word,
+
+  "Tablo 3 - Lojistik regresyon" =
+    lojistik_word,
+
+  path =
+    "/Users/abdullah/Desktop/ablam tez/Sure_analizi_FINAL.docx"
+
+)
+
+
+
+# =====================================================================
+# 68. DOSYALAR OLUŞTU MU?
+# =====================================================================
+
+file.exists(
+  "/Users/abdullah/Desktop/ablam tez/Sure_analizi_FINAL.docx"
+)
+
+
+file.exists(
+  "/Users/abdullah/Desktop/ablam tez/Table2_sure_ay.html"
+)
+
+
+file.exists(
+  "/Users/abdullah/Desktop/ablam tez/Table3_sure_lojistik.html"
+)
+
+
+
+# =====================================================================
+# 69. SON ÖZET
+# =====================================================================
+
+cat(
+  "\n",
+  "============================================================\n",
+  "ANALİZ TAMAMLANDI\n",
+  "============================================================\n"
+)
+
+
+cat(
+  "\nAna süre birimi: AY\n"
+)
+
+
+cat(
+  "Grup karşılaştırması: Mann-Whitney U testi\n"
+)
+
+
+cat(
+  "Regresyon: Binary lojistik regresyon\n"
+)
+
+
+cat(
+  "Regresyon etkisi: Her 1 aylık süre artışı için OR\n"
+)
+
+
+cat(
+  "Tarih dönüşümü: tz = 'UTC' ile saat dilimi güvenliği sağlandı\n"
+)
+
+
+cat(
+  "\nSonuç dosyası:\n"
+)
+
+
+cat(
+  "/Users/abdullah/Desktop/ablam tez/Sure_analizi_FINAL.docx\n"
+)
+
+
+
+# =====================================================================
+# 70. SESSION BİLGİSİ
+# =====================================================================
+
+sessionInfo()
+
+
+
+# =====================================================================
+# =====================================================================
+#
+#                 2. ANALİZ TAMAMLANDI
+#
+# =====================================================================
+# =====================================================================
