@@ -1,0 +1,1499 @@
+# ======================================================================
+# 5. ANALİZ
+# SİGARA KULLANIMI VE REZİDÜ HASTALIK İLİŞKİSİ
+#
+# AMAÇ:
+# 1. Sigara kullanımı ile rezidü hastalık arasındaki ilişkiyi incelemek
+# 2. 2x2 çapraz tablo oluşturmak
+# 3. Hasta sayısı ve yüzdelerini göstermek
+# 4. Beklenen hücre sayılarına göre Pearson Ki-kare / Fisher exact
+#    testini otomatik seçmek
+# 5. Crude OR ve %95 güven aralığını hesaplamak
+# 6. Univariable logistic regression yapmak
+# 7. Paket-yıl bilgisini ayrıca keşifsel olarak incelemek
+#
+# ANA KODLAMA:
+# Sigara:
+#   0 = Kullanmıyor
+#   1 = Kullanıyor
+#
+# Rezidü:
+#   0 = Rezidü negatif
+#   1 = Rezidü pozitif
+#
+# NOT:
+# Sigara değişkenindeki 0 ve 1 dışındaki değerler otomatik olarak
+# yeniden kodlanmayacaktır. Önce veri kalitesi kontrol edilecektir.
+# ======================================================================
+
+
+# ----------------------------------------------------------------------
+# 0. ÇALIŞMA ORTAMINI TEMİZLE
+# ----------------------------------------------------------------------
+
+rm(list = ls())
+
+
+# ----------------------------------------------------------------------
+# 1. GEREKLİ PAKETLER
+# ----------------------------------------------------------------------
+
+gerekli_paketler <- c(
+  "readxl",
+  "dplyr",
+  "broom",
+  "gt",
+  "writexl",
+  "flextable",
+  "officer",
+  "ggplot2"
+)
+
+yuklu_paketler <- rownames(installed.packages())
+
+for (p in gerekli_paketler) {
+
+  if (!(p %in% yuklu_paketler)) {
+
+    install.packages(
+      p,
+      dependencies = TRUE
+    )
+
+  }
+}
+
+
+library(readxl)
+library(dplyr)
+library(broom)
+library(gt)
+library(writexl)
+library(flextable)
+library(officer)
+library(ggplot2)
+
+
+# ----------------------------------------------------------------------
+# 2. ÇIKTI KLASÖRÜ
+# ----------------------------------------------------------------------
+
+cikti_klasoru <- "/Users/abdullah/Desktop/ablam tez"
+
+
+if (!dir.exists(cikti_klasoru)) {
+
+  stop(
+    "Çıktı klasörü bulunamadı: ",
+    cikti_klasoru,
+    "\nLütfen cikti_klasoru değişkenini kontrol edin."
+  )
+
+}
+
+
+# ----------------------------------------------------------------------
+# 3. EXCEL DOSYASINI OKU
+# ----------------------------------------------------------------------
+
+leep_yolu <- file.path(
+  cikti_klasoru,
+  "leep_tlh.xlsx"
+)
+
+
+if (!file.exists(leep_yolu)) {
+
+  stop(
+    "Excel dosyası bulunamadı: ",
+    leep_yolu
+  )
+
+}
+
+
+veri <- read_excel(
+  leep_yolu,
+  sheet = "Sayfa1",
+  skip = 1
+)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("VERİ SETİ\n")
+cat("============================================================\n")
+
+cat("\nBoyut:\n")
+print(dim(veri))
+
+
+# ----------------------------------------------------------------------
+# 4. DEĞİŞKEN İSİMLERİNİ DÜZENLE
+# ----------------------------------------------------------------------
+
+names(veri) <- c(
+  "hasta_id",
+  "yas",
+  "bmi",
+  "gravida",
+  "parite",
+  "abortus",
+  "nsd",
+  "cs",
+  "menopoz",
+  "leep_konizasyon",
+  "ilk_leep_tarihi",
+  "eksen_3_9",
+  "eksen_6_12",
+  "os_kalinligi",
+  "materyal_butunlugu",
+  "parca_sayisi",
+  "termal_artefakt",
+  "lezyon_derecesi",
+  "ecc",
+  "glanduler_tutulum",
+  "cerrahi_sinir",
+  "sinir_pozitif_yeri",
+  "ki67",
+  "p16",
+  "reeksizyon_yontemi",
+  "reeksizyon_tarihi",
+  "rezidu",
+  "rezidu_derecesi",
+  "ikinci_sinir",
+  "ikinci_glanduler_tutulum",
+  "notlar",
+  "sigara",
+  "paket_yil",
+  "diger"
+)
+
+
+# ----------------------------------------------------------------------
+# 5. HAM SİGARA VERİSİNİ KONTROL ET
+# ----------------------------------------------------------------------
+#
+# ÇOK ÖNEMLİ:
+# Önce Excel'de sigara sütununda gerçekten hangi değerlerin
+# bulunduğunu görüyoruz.
+#
+# Böylece örneğin:
+# 0 / 1
+# Evet / Hayır
+# Var / Yok
+# boş
+# vb. bir durum varsa fark edilir.
+# ----------------------------------------------------------------------
+
+cat("\n")
+cat("============================================================\n")
+cat("HAM SİGARA DEĞİŞKENİ\n")
+cat("============================================================\n")
+
+print(
+  table(
+    veri$sigara,
+    useNA = "ifany"
+  )
+)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("HAM PAKET-YIL DEĞİŞKENİ\n")
+cat("============================================================\n")
+
+print(
+  table(
+    veri$paket_yil,
+    useNA = "ifany"
+  )
+)
+
+
+# ----------------------------------------------------------------------
+# 6. DEĞİŞKENLERİ NUMERİK HALE GETİR
+# ----------------------------------------------------------------------
+
+veri <- veri %>%
+  mutate(
+
+    rezidu =
+      suppressWarnings(
+        as.numeric(rezidu)
+      ),
+
+    sigara =
+      suppressWarnings(
+        as.numeric(sigara)
+      ),
+
+    paket_yil =
+      suppressWarnings(
+        as.numeric(paket_yil)
+      ),
+
+    yas =
+      suppressWarnings(
+        as.numeric(yas)
+      ),
+
+    menopoz =
+      suppressWarnings(
+        as.numeric(menopoz)
+      )
+
+  )
+
+
+# ----------------------------------------------------------------------
+# 7. REZİDÜ HASTALIK DEĞİŞKENİNİ TEMİZLE
+# ----------------------------------------------------------------------
+#
+# Yalnızca:
+# 0 = negatif
+# 1 = pozitif
+#
+# kabul edilir.
+#
+# Diğer kodlar NA yapılır.
+# ----------------------------------------------------------------------
+
+veri <- veri %>%
+  mutate(
+
+    rezidu_binary = case_when(
+
+      rezidu == 0 ~ 0,
+
+      rezidu == 1 ~ 1,
+
+      TRUE ~ NA_real_
+
+    ),
+
+    rezidu_grup = factor(
+
+      rezidu_binary,
+
+      levels = c(0, 1),
+
+      labels = c(
+        "Rezidü negatif",
+        "Rezidü pozitif"
+      )
+
+    )
+
+  )
+
+
+# ----------------------------------------------------------------------
+# 8. SİGARA DEĞİŞKENİNİ TEMİZLE
+# ----------------------------------------------------------------------
+#
+# Yalnızca:
+#
+# 0 = Sigara kullanmıyor
+# 1 = Sigara kullanıyor
+#
+# kabul edilir.
+#
+# 0 ve 1 dışındaki kodlar NA yapılır.
+# Böylece yanlış kodları sessizce yanlış gruba atamamış oluruz.
+# ----------------------------------------------------------------------
+
+veri <- veri %>%
+  mutate(
+
+    sigara_binary = case_when(
+
+      sigara == 0 ~ 0,
+
+      sigara == 1 ~ 1,
+
+      TRUE ~ NA_real_
+
+    ),
+
+    sigara_grup = factor(
+
+      sigara_binary,
+
+      levels = c(0, 1),
+
+      labels = c(
+        "Sigara kullanmıyor",
+        "Sigara kullanıyor"
+      )
+
+    )
+
+  )
+
+
+# ----------------------------------------------------------------------
+# 9. GEÇERSİZ KODLARI GÖSTER
+# ----------------------------------------------------------------------
+
+gecersiz_sigara <- veri %>%
+
+  mutate(
+    satir_no = row_number()
+  ) %>%
+
+  filter(
+    !is.na(sigara),
+    !(sigara %in% c(0, 1))
+  ) %>%
+
+  select(
+    satir_no,
+    hasta_id,
+    sigara,
+    paket_yil,
+    notlar
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("0/1 DIŞINDA SİGARA KODU OLAN HASTALAR\n")
+cat("============================================================\n")
+
+print(gecersiz_sigara)
+
+
+# Geçersiz rezidü kodları
+
+gecersiz_rezidu <- veri %>%
+
+  mutate(
+    satir_no = row_number()
+  ) %>%
+
+  filter(
+    !is.na(rezidu),
+    !(rezidu %in% c(0, 1))
+  ) %>%
+
+  select(
+    satir_no,
+    hasta_id,
+    rezidu,
+    notlar
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("0/1 DIŞINDA REZİDÜ KODU OLAN HASTALAR\n")
+cat("============================================================\n")
+
+print(gecersiz_rezidu)
+
+
+# ----------------------------------------------------------------------
+# 10. ANA SİGARA ANALİZ POPÜLASYONU
+# ----------------------------------------------------------------------
+#
+# Hem geçerli sigara bilgisi
+# hem geçerli rezidü sonucu olan hastalar.
+# ----------------------------------------------------------------------
+
+sigara_analiz <- veri %>%
+
+  filter(
+    !is.na(sigara_binary),
+    !is.na(rezidu_binary)
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("ANA SİGARA ANALİZ POPÜLASYONU\n")
+cat("============================================================\n")
+
+cat("\nToplam analiz N:\n")
+print(nrow(sigara_analiz))
+
+
+cat("\nSigara kullanımı:\n")
+print(
+  table(
+    sigara_analiz$sigara_grup
+  )
+)
+
+
+cat("\nRezidü hastalık:\n")
+print(
+  table(
+    sigara_analiz$rezidu_grup
+  )
+)
+
+
+# ----------------------------------------------------------------------
+# 11. EKSİK VERİ ÖZETİ
+# ----------------------------------------------------------------------
+
+eksik_ozet <- veri %>%
+  summarise(
+
+    Toplam_N =
+      n(),
+
+    Gecerli_rezidu_N =
+      sum(!is.na(rezidu_binary)),
+
+    Gecerli_sigara_N =
+      sum(!is.na(sigara_binary)),
+
+    Her_ikisi_mevcut_N =
+      sum(
+        !is.na(rezidu_binary) &
+        !is.na(sigara_binary)
+      ),
+
+    Sigara_eksik_N =
+      sum(is.na(sigara_binary)),
+
+    Rezidu_eksik_gecersiz_N =
+      sum(is.na(rezidu_binary))
+
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("EKSİK VERİ ÖZETİ\n")
+cat("============================================================\n")
+
+print(eksik_ozet)
+
+
+# ======================================================================
+# 12. 2 x 2 ÇAPRAZ TABLO
+# ======================================================================
+
+capraz_tablo <- table(
+
+  sigara_analiz$sigara_grup,
+
+  sigara_analiz$rezidu_grup
+
+)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("2 x 2 ÇAPRAZ TABLO - HASTA SAYILARI\n")
+cat("============================================================\n")
+
+print(capraz_tablo)
+
+
+# ----------------------------------------------------------------------
+# 13. SÜTUN YÜZDELERİ
+# ----------------------------------------------------------------------
+#
+# Burada yüzdeler REZİDÜ GRUBU içinde hesaplanır.
+#
+# Örneğin:
+# Rezidü negatif hastaların yüzde kaçı sigara kullanıyor?
+# Rezidü pozitif hastaların yüzde kaçı sigara kullanıyor?
+#
+# Bu nedenle prop.table(..., margin = 2) kullanıyoruz.
+# ----------------------------------------------------------------------
+
+yuzde_tablo <- prop.table(
+  capraz_tablo,
+  margin = 2
+) * 100
+
+
+cat("\n")
+cat("============================================================\n")
+cat("SÜTUN YÜZDELERİ (%)\n")
+cat("============================================================\n")
+
+print(
+  round(
+    yuzde_tablo,
+    1
+  )
+)
+
+
+# ======================================================================
+# 14. BEKLENEN HÜCRE SAYILARINI HESAPLA
+# ======================================================================
+
+ki_kare_gecici <- suppressWarnings(
+  chisq.test(
+    capraz_tablo,
+    correct = FALSE
+  )
+)
+
+
+beklenen <- ki_kare_gecici$expected
+
+
+cat("\n")
+cat("============================================================\n")
+cat("BEKLENEN HÜCRE SAYILARI\n")
+cat("============================================================\n")
+
+print(
+  round(
+    beklenen,
+    2
+  )
+)
+
+
+# ======================================================================
+# 15. TESTİ OTOMATİK SEÇ
+# ======================================================================
+#
+# Pratik ve konservatif karar:
+#
+# Herhangi bir beklenen hücre < 5 ise:
+#     Fisher exact test
+#
+# Tüm beklenen hücreler >= 5 ise:
+#     Pearson Ki-kare testi
+#
+# 2x2 tabloda Yates continuity correction kullanmıyoruz;
+# Pearson chi-square correct = FALSE olarak hesaplanıyor.
+# ======================================================================
+
+if (any(beklenen < 5)) {
+
+  kullanilan_test <-
+    "Fisher exact testi"
+
+  ana_test <-
+    fisher.test(
+      capraz_tablo
+    )
+
+  p_degeri <-
+    ana_test$p.value
+
+} else {
+
+  kullanilan_test <-
+    "Pearson Ki-kare testi"
+
+  ana_test <-
+    chisq.test(
+      capraz_tablo,
+      correct = FALSE
+    )
+
+  p_degeri <-
+    ana_test$p.value
+
+}
+
+
+cat("\n")
+cat("============================================================\n")
+cat("ANA İSTATİSTİKSEL TEST\n")
+cat("============================================================\n")
+
+cat("\nKullanılan test:\n")
+print(kullanilan_test)
+
+cat("\np değeri:\n")
+print(p_degeri)
+
+cat("\nTestin tam çıktısı:\n")
+print(ana_test)
+
+
+# ======================================================================
+# 16. CRUDE ODDS RATIO
+# ======================================================================
+#
+# OR aşağıdaki karşılaştırmayı ifade eder:
+#
+# Sigara kullanan vs kullanmayan
+#
+# Outcome:
+# Rezidü pozitif vs negatif
+#
+# OR > 1:
+# Sigara kullananlarda rezidü pozitifliği odds'u daha yüksek.
+#
+# OR < 1:
+# Sigara kullananlarda rezidü pozitifliği odds'u daha düşük.
+#
+# OR = 1:
+# Odds açısından ilişki yok.
+#
+# %95 GA 1'i içeriyorsa klasik alfa=0.05 düzeyinde
+# istatistiksel olarak anlamlı ilişki desteklenmez.
+# ======================================================================
+
+model_sigara <- glm(
+
+  rezidu_binary ~ sigara_binary,
+
+  data = sigara_analiz,
+
+  family = binomial(
+    link = "logit"
+  )
+
+)
+
+
+sigara_or <- broom::tidy(
+
+  model_sigara,
+
+  conf.int = TRUE,
+
+  exponentiate = TRUE
+
+) %>%
+
+  filter(
+    term == "sigara_binary"
+  ) %>%
+
+  transmute(
+
+    Degisken =
+      "Sigara kullanıyor (referans: kullanmıyor)",
+
+    OR =
+      estimate,
+
+    Alt_95_GA =
+      conf.low,
+
+    Ust_95_GA =
+      conf.high,
+
+    p_degeri =
+      p.value
+
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("UNIVARIABLE LOJİSTİK REGRESYON\n")
+cat("============================================================\n")
+
+print(sigara_or)
+
+
+# ======================================================================
+# 17. ANA TEZ TABLOSU İÇİN n (%)
+# ======================================================================
+#
+# Rezidü negatif ve pozitif gruplar ayrı sütunlardır.
+# Hücreler:
+#
+# n (sütun %)
+#
+# şeklinde gösterilir.
+# ======================================================================
+
+
+# Hücre sayılarını al
+
+n_negatif_kullanmiyor <-
+  capraz_tablo[
+    "Sigara kullanmıyor",
+    "Rezidü negatif"
+  ]
+
+
+n_negatif_kullaniyor <-
+  capraz_tablo[
+    "Sigara kullanıyor",
+    "Rezidü negatif"
+  ]
+
+
+n_pozitif_kullanmiyor <-
+  capraz_tablo[
+    "Sigara kullanmıyor",
+    "Rezidü pozitif"
+  ]
+
+
+n_pozitif_kullaniyor <-
+  capraz_tablo[
+    "Sigara kullanıyor",
+    "Rezidü pozitif"
+  ]
+
+
+# Yüzdeleri al
+
+p_negatif_kullanmiyor <-
+  yuzde_tablo[
+    "Sigara kullanmıyor",
+    "Rezidü negatif"
+  ]
+
+
+p_negatif_kullaniyor <-
+  yuzde_tablo[
+    "Sigara kullanıyor",
+    "Rezidü negatif"
+  ]
+
+
+p_pozitif_kullanmiyor <-
+  yuzde_tablo[
+    "Sigara kullanmıyor",
+    "Rezidü pozitif"
+  ]
+
+
+p_pozitif_kullaniyor <-
+  yuzde_tablo[
+    "Sigara kullanıyor",
+    "Rezidü pozitif"
+  ]
+
+
+# p değerini formatla
+
+p_yaz <- ifelse(
+
+  p_degeri < 0.001,
+
+  "<0.001",
+
+  sprintf(
+    "%.3f",
+    p_degeri
+  )
+
+)
+
+
+# ----------------------------------------------------------------------
+# 18. ANA TABLOYU OLUŞTUR
+# ----------------------------------------------------------------------
+
+tablo_sigara <- data.frame(
+
+  Degisken = c(
+    "Sigara kullanımı",
+    "  Kullanmıyor",
+    "  Kullanıyor"
+  ),
+
+  Rezidu_negatif = c(
+
+    "",
+
+    sprintf(
+      "%d (%.1f%%)",
+      n_negatif_kullanmiyor,
+      p_negatif_kullanmiyor
+    ),
+
+    sprintf(
+      "%d (%.1f%%)",
+      n_negatif_kullaniyor,
+      p_negatif_kullaniyor
+    )
+
+  ),
+
+  Rezidu_pozitif = c(
+
+    "",
+
+    sprintf(
+      "%d (%.1f%%)",
+      n_pozitif_kullanmiyor,
+      p_pozitif_kullanmiyor
+    ),
+
+    sprintf(
+      "%d (%.1f%%)",
+      n_pozitif_kullaniyor,
+      p_pozitif_kullaniyor
+    )
+
+  ),
+
+  P_degeri = c(
+    p_yaz,
+    "",
+    ""
+  ),
+
+  stringsAsFactors = FALSE
+
+)
+
+
+cat("\n")
+cat("============================================================\n")
+cat("ANA TEZ TABLOSU\n")
+cat("============================================================\n")
+
+print(tablo_sigara)
+
+
+# ======================================================================
+# 19. GT İLE PROFESYONEL HTML TABLO
+# ======================================================================
+
+n_negatif <-
+  sum(
+    sigara_analiz$rezidu_binary == 0
+  )
+
+
+n_pozitif <-
+  sum(
+    sigara_analiz$rezidu_binary == 1
+  )
+
+
+tablo_sigara_gt <- tablo_sigara %>%
+
+  gt() %>%
+
+  cols_label(
+
+    Degisken =
+      "Değişken",
+
+    Rezidu_negatif =
+      paste0(
+        "Rezidü negatif (n=",
+        n_negatif,
+        ")"
+      ),
+
+    Rezidu_pozitif =
+      paste0(
+        "Rezidü pozitif (n=",
+        n_pozitif,
+        ")"
+      ),
+
+    P_degeri =
+      "p"
+
+  ) %>%
+
+  tab_header(
+
+    title = md(
+      "**Tablo 5. Sigara kullanımı ile rezidü hastalık arasındaki ilişki**"
+    )
+
+  ) %>%
+
+  tab_source_note(
+
+    source_note = md(
+
+      paste0(
+
+        "**Not:** Veriler n (sütun %) olarak verilmiştir. ",
+
+        "İstatistiksel karşılaştırmada ",
+
+        kullanilan_test,
+
+        " kullanılmıştır. ",
+
+        "Yüzdeler rezidü hastalık grubu içerisinde hesaplanmıştır."
+
+      )
+
+    )
+
+  ) %>%
+
+  tab_options(
+
+    table.font.names =
+      "Times New Roman",
+
+    table.font.size =
+      px(12),
+
+    heading.title.font.size =
+      px(13),
+
+    source_notes.font.size =
+      px(10)
+
+  )
+
+
+tablo_sigara_gt
+
+
+# ----------------------------------------------------------------------
+# 20. HTML OLARAK KAYDET
+# ----------------------------------------------------------------------
+
+gtsave(
+
+  tablo_sigara_gt,
+
+  filename = file.path(
+    cikti_klasoru,
+    "Tablo_5_Sigara_Rezidu.html"
+  )
+
+)
+
+
+# ======================================================================
+# 21. WORD TABLOSU
+# ======================================================================
+
+tablo_word <-
+  flextable(
+    tablo_sigara
+  )
+
+
+tablo_word <-
+  set_header_labels(
+
+    tablo_word,
+
+    Degisken =
+      "Değişken",
+
+    Rezidu_negatif =
+      paste0(
+        "Rezidü negatif\n(n=",
+        n_negatif,
+        ")"
+      ),
+
+    Rezidu_pozitif =
+      paste0(
+        "Rezidü pozitif\n(n=",
+        n_pozitif,
+        ")"
+      ),
+
+    P_degeri =
+      "p"
+
+  )
+
+
+# Times New Roman
+
+tablo_word <-
+  font(
+    tablo_word,
+    fontname = "Times New Roman",
+    part = "all"
+  )
+
+
+tablo_word <-
+  fontsize(
+    tablo_word,
+    size = 11,
+    part = "all"
+  )
+
+
+tablo_word <-
+  bold(
+    tablo_word,
+    part = "header",
+    bold = TRUE
+  )
+
+
+tablo_word <-
+  autofit(
+    tablo_word
+  )
+
+
+# ----------------------------------------------------------------------
+# 22. WORD DOSYASINI OLUŞTUR
+# ----------------------------------------------------------------------
+
+doc <- read_docx()
+
+
+doc <- body_add_par(
+
+  doc,
+
+  value =
+    "Tablo 5. Sigara kullanımı ile rezidü hastalık arasındaki ilişki",
+
+  style =
+    "heading 2"
+
+)
+
+
+doc <- body_add_flextable(
+
+  doc,
+
+  value =
+    tablo_word
+
+)
+
+
+doc <- body_add_par(
+
+  doc,
+
+  value = paste0(
+
+    "Not: Veriler n (sütun %) olarak verilmiştir. ",
+
+    "Yüzdeler rezidü hastalık grubu içerisinde hesaplanmıştır. ",
+
+    "İstatistiksel karşılaştırmada ",
+
+    kullanilan_test,
+
+    " kullanılmıştır."
+
+  )
+
+)
+
+
+print(
+
+  doc,
+
+  target = file.path(
+    cikti_klasoru,
+    "Tablo_5_Sigara_Rezidu.docx"
+  )
+
+)
+
+
+# ======================================================================
+# 23. PAKET-YIL ANALİZİ
+# ======================================================================
+#
+# Paket-yıl yalnızca sayısal ve mevcut değerleri olan hastalarda
+# analiz edilir.
+#
+# DİKKAT:
+# Paket-yılın 0 olması ile eksik olması aynı şey değildir.
+#
+# 0:
+# gerçekten hiç sigara maruziyeti yoksa anlamlı bir değerdir.
+#
+# NA:
+# bilgi yok demektir.
+# ======================================================================
+
+paket_yil_analiz <- veri %>%
+
+  filter(
+    !is.na(rezidu_binary),
+    !is.na(paket_yil),
+    paket_yil >= 0
+  )
+
+
+cat("\n")
+cat("============================================================\n")
+cat("PAKET-YIL ANALİZİ\n")
+cat("============================================================\n")
+
+cat("\nPaket-yıl bilgisi bulunan N:\n")
+print(
+  nrow(
+    paket_yil_analiz
+  )
+)
+
+
+# ----------------------------------------------------------------------
+# 24. PAKET-YIL TANIMLAYICI İSTATİSTİKLER
+# ----------------------------------------------------------------------
+
+paket_yil_tanimlayici <-
+  paket_yil_analiz %>%
+
+  group_by(
+    rezidu_grup
+  ) %>%
+
+  summarise(
+
+    N =
+      n(),
+
+    Ortalama =
+      mean(
+        paket_yil,
+        na.rm = TRUE
+      ),
+
+    SD =
+      sd(
+        paket_yil,
+        na.rm = TRUE
+      ),
+
+    Medyan =
+      median(
+        paket_yil,
+        na.rm = TRUE
+      ),
+
+    Q1 =
+      quantile(
+        paket_yil,
+        0.25,
+        na.rm = TRUE
+      ),
+
+    Q3 =
+      quantile(
+        paket_yil,
+        0.75,
+        na.rm = TRUE
+      ),
+
+    Minimum =
+      min(
+        paket_yil,
+        na.rm = TRUE
+      ),
+
+    Maksimum =
+      max(
+        paket_yil,
+        na.rm = TRUE
+      ),
+
+    .groups =
+      "drop"
+
+  )
+
+
+print(
+  paket_yil_tanimlayici
+)
+
+
+# ----------------------------------------------------------------------
+# 25. PAKET-YIL GRUP KARŞILAŞTIRMASI
+# ----------------------------------------------------------------------
+#
+# Paket-yıl genellikle oldukça çarpık dağıldığından
+# Mann-Whitney U testi kullanıyoruz.
+# ----------------------------------------------------------------------
+
+if (
+  nrow(paket_yil_analiz) > 0 &&
+  length(unique(paket_yil_analiz$rezidu_binary)) == 2
+) {
+
+  paket_yil_mann <-
+    wilcox.test(
+
+      paket_yil ~ rezidu_grup,
+
+      data =
+        paket_yil_analiz,
+
+      exact =
+        FALSE
+
+    )
+
+
+  cat("\nPaket-yıl Mann-Whitney U testi:\n")
+
+  print(
+    paket_yil_mann
+  )
+
+} else {
+
+  paket_yil_mann <- NULL
+
+  cat(
+    "\nPaket-yıl karşılaştırması için yeterli veri yok.\n"
+  )
+
+}
+
+
+# ----------------------------------------------------------------------
+# 26. PAKET-YIL UNİVARIABLE LOJİSTİK REGRESYON
+# ----------------------------------------------------------------------
+#
+# Buradaki OR:
+#
+# paket-yıldaki HER 1 BİRİM artış için OR'dur.
+#
+# Daha klinik yorum için aşağıda ayrıca her 10 paket-yıl
+# artış başına OR hesaplanmaktadır.
+# ----------------------------------------------------------------------
+
+if (
+  nrow(paket_yil_analiz) > 0 &&
+  length(unique(paket_yil_analiz$rezidu_binary)) == 2
+) {
+
+  paket_yil_analiz <-
+    paket_yil_analiz %>%
+
+    mutate(
+      paket_yil_10 =
+        paket_yil / 10
+    )
+
+
+  model_paket_yil <-
+    glm(
+
+      rezidu_binary ~ paket_yil_10,
+
+      data =
+        paket_yil_analiz,
+
+      family =
+        binomial(
+          link = "logit"
+        )
+
+    )
+
+
+  paket_yil_or <-
+    broom::tidy(
+
+      model_paket_yil,
+
+      conf.int = TRUE,
+
+      exponentiate = TRUE
+
+    ) %>%
+
+    filter(
+      term == "paket_yil_10"
+    ) %>%
+
+    transmute(
+
+      Degisken =
+        "Paket-yıl (her 10 paket-yıl artış)",
+
+      OR =
+        estimate,
+
+      Alt_95_GA =
+        conf.low,
+
+      Ust_95_GA =
+        conf.high,
+
+      p_degeri =
+        p.value
+
+    )
+
+
+  cat("\n")
+  cat("Paket-yıl lojistik regresyonu:\n")
+
+  print(
+    paket_yil_or
+  )
+
+
+} else {
+
+  paket_yil_or <-
+    data.frame(
+
+      Degisken =
+        character(),
+
+      OR =
+        numeric(),
+
+      Alt_95_GA =
+        numeric(),
+
+      Ust_95_GA =
+        numeric(),
+
+      p_degeri =
+        numeric()
+
+    )
+
+}
+
+
+# ======================================================================
+# 27. EXCEL'E TÜM SONUÇLARI AKTAR
+# ======================================================================
+
+write_xlsx(
+
+  list(
+
+    "Ana_Tablo" =
+      tablo_sigara,
+
+    "Beklenen_Hucreler" =
+      as.data.frame.matrix(
+        beklenen
+      ),
+
+    "Sigara_Crude_OR" =
+      as.data.frame(
+        sigara_or
+      ),
+
+    "Eksik_Veri" =
+      as.data.frame(
+        eksik_ozet
+      ),
+
+    "Gecersiz_Sigara" =
+      as.data.frame(
+        gecersiz_sigara
+      ),
+
+    "PaketYil_Tanimlayici" =
+      as.data.frame(
+        paket_yil_tanimlayici
+      ),
+
+    "PaketYil_OR" =
+      as.data.frame(
+        paket_yil_or
+      )
+
+  ),
+
+  path = file.path(
+    cikti_klasoru,
+    "Sigara_Rezidu_Analizi.xlsx"
+  )
+
+)
+
+
+# ======================================================================
+# 28. ANALİZ SONU
+# ======================================================================
+
+cat("\n\n")
+cat("============================================================\n")
+cat("5. SİGARA ANALİZİ TAMAMLANDI\n")
+cat("============================================================\n")
+
+
+cat("\nAna analiz N:\n")
+cat(
+  nrow(sigara_analiz),
+  "\n"
+)
+
+
+cat("\nKullanılan karşılaştırma testi:\n")
+cat(
+  kullanilan_test,
+  "\n"
+)
+
+
+cat("\np değeri:\n")
+cat(
+  p_yaz,
+  "\n"
+)
+
+
+cat("\nCrude OR sonucu:\n")
+print(
+  sigara_or
+)
+
+
+if (nrow(gecersiz_sigara) > 0) {
+
+  cat(
+    "\nUYARI:",
+    nrow(gecersiz_sigara),
+    "hasta 0/1 dışındaki sigara kodu nedeniyle",
+    "ana analiz dışında bırakılmıştır.\n"
+  )
+
+}
+
+
+if (nrow(gecersiz_rezidu) > 0) {
+
+  cat(
+    "\nUYARI:",
+    nrow(gecersiz_rezidu),
+    "hasta 0/1 dışındaki rezidü kodu nedeniyle",
+    "ana analiz dışında bırakılmıştır.\n"
+  )
+
+}
+
+
+cat("\nOluşturulan dosyalar:\n")
+
+cat(
+  file.path(
+    cikti_klasoru,
+    "Tablo_5_Sigara_Rezidu.html"
+  ),
+  "\n"
+)
+
+cat(
+  file.path(
+    cikti_klasoru,
+    "Tablo_5_Sigara_Rezidu.docx"
+  ),
+  "\n"
+)
+
+cat(
+  file.path(
+    cikti_klasoru,
+    "Sigara_Rezidu_Analizi.xlsx"
+  ),
+  "\n"
+)
+
+cat("\n============================================================\n")
