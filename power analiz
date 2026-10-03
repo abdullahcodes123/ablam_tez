@@ -1,0 +1,888 @@
+# ======================================================================
+#              POWER / ÖRNEKLEM BÜYÜKLÜĞÜ ANALİZİ
+#       ELDEKİ KİŞİ SAYISI OTOMATİK OLARAK EXCEL'DEN ALINIR
+# ======================================================================
+# Alfa = 0.05 | Güç = 0.80 | İki yönlü test
+# Sürekli: Cohen's d (0.20 - 0.80) | Kategorik: Cohen's h (0.20 - 0.80)
+# ======================================================================
+
+
+# ======================================================================
+# 1. ORTAMI TEMİZLE
+# ======================================================================
+
+rm(list = ls())
+graphics.off()
+
+
+# ======================================================================
+# 2. PAKETLER
+# ======================================================================
+
+paketler <- c(
+  "readxl", "pwr", "dplyr", "tidyr",
+  "gt", "flextable", "officer", "writexl"
+)
+
+for (p in paketler) {
+  if (!requireNamespace(p, quietly = TRUE)) {
+    install.packages(p, dependencies = TRUE)
+  }
+}
+
+library(readxl)
+library(pwr)
+library(dplyr)
+library(tidyr)
+library(gt)
+library(flextable)
+library(officer)
+library(writexl)
+
+
+# ======================================================================
+# 3. ANA KLASÖR VE DOSYALAR
+# ======================================================================
+
+ana_klasor <- "/Users/abdullah/Desktop/ablam tez"
+
+dosya_leep <- file.path(ana_klasor, "leep_tlh.xlsx")
+dosya_veri <- file.path(ana_klasor, "veri_toplama.xlsx")
+
+if (!dir.exists(ana_klasor)) stop("Ana klasör bulunamadı: ", ana_klasor)
+if (!file.exists(dosya_leep)) stop("Dosya bulunamadı: ", dosya_leep)
+if (!file.exists(dosya_veri)) stop("Dosya bulunamadı: ", dosya_veri)
+
+
+# ======================================================================
+# 4. EXCEL DOSYALARINI OKU
+# ======================================================================
+
+leep_veri <- read_excel(
+  path = dosya_leep,
+  sheet = "Sayfa1",
+  skip = 1
+)
+
+veri_toplama <- read_excel(
+  path = dosya_veri,
+  sheet = "Veri Toplama Formu",
+  skip = 3
+)
+
+
+# ======================================================================
+# 5. HASTA NUMARALARINI AL
+# ======================================================================
+
+leep_hastalar <- leep_veri %>%
+  transmute(
+    hasta_no = as.character(.[[1]]),
+    kaynak = "leep_tlh.xlsx"
+  )
+
+veri_toplama_hastalar <- veri_toplama %>%
+  transmute(
+    hasta_no = as.character(.[[1]]),
+    kaynak = "veri_toplama.xlsx"
+  )
+
+
+# ======================================================================
+# 6. HASTA NUMARALARINI TEMİZLE
+# ======================================================================
+
+leep_hastalar <- leep_hastalar %>%
+  mutate(hasta_no = trimws(hasta_no)) %>%
+  filter(
+    !is.na(hasta_no),
+    hasta_no != "",
+    toupper(hasta_no) != "NA",
+    !grepl("^ÖRNEK", toupper(hasta_no)),
+    !grepl("^ORNEK", toupper(hasta_no))
+  )
+
+veri_toplama_hastalar <- veri_toplama_hastalar %>%
+  mutate(hasta_no = trimws(hasta_no)) %>%
+  filter(
+    !is.na(hasta_no),
+    hasta_no != "",
+    toupper(hasta_no) != "NA",
+    !grepl("^ÖRNEK", toupper(hasta_no)),
+    !grepl("^ORNEK", toupper(hasta_no))
+  )
+
+
+# ======================================================================
+# 7. İKİ DOSYAYI BİRLEŞTİR
+# ======================================================================
+
+tum_hasta_kayitlari <- bind_rows(
+  leep_hastalar,
+  veri_toplama_hastalar
+)
+
+
+# ======================================================================
+# 8. BENZERSİZ HASTALARI BUL
+# ======================================================================
+
+benzersiz_hastalar <- tum_hasta_kayitlari %>%
+  distinct(hasta_no)
+
+
+# ======================================================================
+# 9. DİNAMİK SABİT GRUP N
+# ======================================================================
+
+n_sabit <- nrow(benzersiz_hastalar)
+
+if (is.na(n_sabit) || n_sabit < 2) {
+  stop("Geçerli hasta sayısı hesaplanamadı.")
+}
+
+
+# ======================================================================
+# 10. VERİ SAYILARINI RAPORLA
+# ======================================================================
+
+n_leep <- leep_hastalar %>% distinct(hasta_no) %>% nrow()
+n_veri_toplama <- veri_toplama_hastalar %>% distinct(hasta_no) %>% nrow()
+n_toplam_satir <- nrow(tum_hasta_kayitlari)
+n_tekrar <- n_toplam_satir - n_sabit
+
+cat("\n============================================================\n")
+cat("EXCEL DOSYALARINDAN OTOMATİK HASTA SAYISI\n")
+cat("============================================================\n\n")
+cat("leep_tlh.xlsx benzersiz hasta sayısı =", n_leep, "\n")
+cat("veri_toplama.xlsx benzersiz hasta sayısı =", n_veri_toplama, "\n")
+cat("İki dosya birlikte toplam kayıt =", n_toplam_satir, "\n")
+cat("Tekrarlayan kayıt sayısı =", n_tekrar, "\n")
+cat("TOPLAM BENZERSİZ KİŞİ SAYISI =", n_sabit, "\n\n")
+cat("POWER ANALİZİNDE SABİT GRUP N =", n_sabit, "\n")
+
+
+# ======================================================================
+# 11. TEMEL POWER AYARLARI
+# ======================================================================
+
+alfa <- 0.05
+hedef_power <- 0.80
+maksimum_karsi_grup <- 100000L
+
+cat("\n============================================================\n")
+cat("POWER ANALİZİ AYARLARI\n")
+cat("============================================================\n\n")
+cat("Sabit grup N =", n_sabit, "\n")
+cat("Alfa =", alfa, "\n")
+cat("Hedef power =", hedef_power, "\n")
+cat("Test = iki yönlü\n\n")
+
+
+# ======================================================================
+# 12. ETKİ BÜYÜKLÜKLERİ
+# ======================================================================
+
+etki_degerleri <- c(0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80)
+
+
+# ======================================================================
+# 13. ETKİ BÜYÜKLÜĞÜ ETİKETİ
+# ======================================================================
+
+etki_etiketi <- function(x) {
+  if (x < 0.50) return("Küçük")
+  if (x < 0.80) return("Orta")
+  return("Büyük")
+}
+
+
+# ======================================================================
+#                  A. SÜREKLİ DEĞİŞKENLER
+# ======================================================================
+
+# ======================================================================
+# 14. SÜREKLİ DEĞİŞKEN POWER FONKSİYONU
+# ======================================================================
+
+power_surekli <- function(n_karsi, n_sabit, d, alfa) {
+  sonuc <- pwr::pwr.t2n.test(
+    n1 = n_sabit,
+    n2 = n_karsi,
+    d = d,
+    sig.level = alfa,
+    alternative = "two.sided"
+  )
+  sonuc$power
+}
+
+
+# ======================================================================
+# 15. GEREKLİ KARŞI GRUP N — SÜREKLİ
+# ======================================================================
+
+gerekli_n_surekli <- function(d, n_sabit, hedef_power, alfa, max_n) {
+  
+  maksimum_power <- power_surekli(
+    n_karsi = max_n,
+    n_sabit = n_sabit,
+    d = d,
+    alfa = alfa
+  )
+  
+  if (maksimum_power < hedef_power) {
+    return(
+      data.frame(
+        etki = d,
+        gerekli_karsi_n = NA_integer_,
+        toplam_n = NA_integer_,
+        elde_edilen_power = maksimum_power,
+        durum = paste0(
+          n_sabit,
+          " kişilik sabit grup ile %80 güce ",
+          "yalnızca karşı grup artırılarak ulaşılamaz"
+        )
+      )
+    )
+  }
+  
+  alt <- 2L
+  ust <- 2L
+  
+  while (
+    power_surekli(n_karsi = ust, n_sabit = n_sabit, d = d, alfa = alfa) < hedef_power &&
+    ust < max_n
+  ) {
+    ust <- min(ust * 2L, max_n)
+  }
+  
+  while (alt < ust) {
+    orta <- floor((alt + ust) / 2)
+    pw <- power_surekli(n_karsi = orta, n_sabit = n_sabit, d = d, alfa = alfa)
+    if (pw >= hedef_power) {
+      ust <- orta
+    } else {
+      alt <- orta + 1L
+    }
+  }
+  
+  gerekli_n <- alt
+  
+  final_power <- power_surekli(
+    n_karsi = gerekli_n,
+    n_sabit = n_sabit,
+    d = d,
+    alfa = alfa
+  )
+  
+  data.frame(
+    etki = d,
+    gerekli_karsi_n = gerekli_n,
+    toplam_n = n_sabit + gerekli_n,
+    elde_edilen_power = final_power,
+    durum = "Hedef güce ulaşılıyor"
+  )
+}
+
+
+# ======================================================================
+# 16. TÜM d DEĞERLERİNİ HESAPLA
+# ======================================================================
+
+surekli_sonuclar <- bind_rows(
+  lapply(
+    etki_degerleri,
+    gerekli_n_surekli,
+    n_sabit = n_sabit,
+    hedef_power = hedef_power,
+    alfa = alfa,
+    max_n = maksimum_karsi_grup
+  )
+)
+
+surekli_sonuclar <- surekli_sonuclar %>%
+  mutate(
+    degisken_tipi = "Sürekli değişken",
+    etki_olcusu = "Cohen's d",
+    etki_yorumu = sapply(etki, etki_etiketi)
+  )
+
+
+# ======================================================================
+#                  B. KATEGORİK DEĞİŞKENLER
+# ======================================================================
+
+# ======================================================================
+# 17. KATEGORİK DEĞİŞKEN POWER FONKSİYONU
+# ======================================================================
+
+power_kategorik <- function(n_karsi, n_sabit, h, alfa) {
+  sonuc <- pwr::pwr.2p2n.test(
+    h = h,
+    n1 = n_sabit,
+    n2 = n_karsi,
+    sig.level = alfa,
+    alternative = "two.sided"
+  )
+  sonuc$power
+}
+
+
+# ======================================================================
+# 18. GEREKLİ KARŞI GRUP N — KATEGORİK
+# ======================================================================
+
+gerekli_n_kategorik <- function(h, n_sabit, hedef_power, alfa, max_n) {
+  
+  maksimum_power <- power_kategorik(
+    n_karsi = max_n,
+    n_sabit = n_sabit,
+    h = h,
+    alfa = alfa
+  )
+  
+  if (maksimum_power < hedef_power) {
+    return(
+      data.frame(
+        etki = h,
+        gerekli_karsi_n = NA_integer_,
+        toplam_n = NA_integer_,
+        elde_edilen_power = maksimum_power,
+        durum = paste0(
+          n_sabit,
+          " kişilik sabit grup ile %80 güce ",
+          "yalnızca karşı grup artırılarak ulaşılamaz"
+        )
+      )
+    )
+  }
+  
+  alt <- 2L
+  ust <- 2L
+  
+  while (
+    power_kategorik(n_karsi = ust, n_sabit = n_sabit, h = h, alfa = alfa) < hedef_power &&
+    ust < max_n
+  ) {
+    ust <- min(ust * 2L, max_n)
+  }
+  
+  while (alt < ust) {
+    orta <- floor((alt + ust) / 2)
+    pw <- power_kategorik(n_karsi = orta, n_sabit = n_sabit, h = h, alfa = alfa)
+    if (pw >= hedef_power) {
+      ust <- orta
+    } else {
+      alt <- orta + 1L
+    }
+  }
+  
+  gerekli_n <- alt
+  
+  final_power <- power_kategorik(
+    n_karsi = gerekli_n,
+    n_sabit = n_sabit,
+    h = h,
+    alfa = alfa
+  )
+  
+  data.frame(
+    etki = h,
+    gerekli_karsi_n = gerekli_n,
+    toplam_n = n_sabit + gerekli_n,
+    elde_edilen_power = final_power,
+    durum = "Hedef güce ulaşılıyor"
+  )
+}
+
+
+# ======================================================================
+# 19. TÜM h DEĞERLERİNİ HESAPLA
+# ======================================================================
+
+kategorik_sonuclar <- bind_rows(
+  lapply(
+    etki_degerleri,
+    gerekli_n_kategorik,
+    n_sabit = n_sabit,
+    hedef_power = hedef_power,
+    alfa = alfa,
+    max_n = maksimum_karsi_grup
+  )
+)
+
+kategorik_sonuclar <- kategorik_sonuclar %>%
+  mutate(
+    degisken_tipi = "Kategorik değişken",
+    etki_olcusu = "Cohen's h",
+    etki_yorumu = sapply(etki, etki_etiketi)
+  )
+
+
+# ======================================================================
+# 19B. EK 1 — NA (ULAŞILAMAZ) DURUMUNDA HASTA SAYISINI 1'ER ARTIR
+# ======================================================================
+#
+# Bir etki büyüklüğü için hedef güce ulaşılamıyorsa (NA), sabit grup
+# sayısı 1'er artırılır. Hedef güce İLK ulaşılan sabit N ve o N'deki
+# gerekli karşı grup N kaydedilir.
+#
+# Not: Ana n_sabit DEĞİŞMEZ. Bu yalnızca raporlama için bir
+# "ilk ulaşılan nokta" aramasıdır.
+# ======================================================================
+
+ilk_ulasilan_nokta <- function(
+    etki, n_baslangic, tip,
+    hedef_power, alfa, max_n
+) {
+  
+  n_deneme <- n_baslangic
+  
+  repeat {
+    
+    n_deneme <- n_deneme + 1L
+    
+    if (tip == "surekli") {
+      pw <- power_surekli(max_n, n_deneme, etki, alfa)
+    } else {
+      pw <- power_kategorik(max_n, n_deneme, etki, alfa)
+    }
+    
+    if (pw >= hedef_power) break
+    
+    if (n_deneme > 1000000L) {
+      return(c(NA_integer_, NA_integer_))
+    }
+    
+  }
+  
+  if (tip == "surekli") {
+    sonuc <- gerekli_n_surekli(etki, n_deneme, hedef_power, alfa, max_n)
+  } else {
+    sonuc <- gerekli_n_kategorik(etki, n_deneme, hedef_power, alfa, max_n)
+  }
+  
+  c(n_deneme, sonuc$gerekli_karsi_n)
+}
+
+
+na_icin_ek_bilgi <- function(sonuclar, tip) {
+  
+  sonuclar$ilk_ulasilan_sabit_n <- NA_integer_
+  sonuclar$ilk_ulasilan_karsi_n <- NA_integer_
+  
+  for (i in seq_len(nrow(sonuclar))) {
+    
+    if (is.na(sonuclar$gerekli_karsi_n[i])) {
+      
+      nokta <- ilk_ulasilan_nokta(
+        etki = sonuclar$etki[i],
+        n_baslangic = n_sabit,
+        tip = tip,
+        hedef_power = hedef_power,
+        alfa = alfa,
+        max_n = maksimum_karsi_grup
+      )
+      
+      sonuclar$ilk_ulasilan_sabit_n[i] <- nokta[1]
+      sonuclar$ilk_ulasilan_karsi_n[i] <- nokta[2]
+      
+    }
+    
+  }
+  
+  sonuclar
+}
+
+
+surekli_sonuclar <- na_icin_ek_bilgi(surekli_sonuclar, "surekli")
+kategorik_sonuclar <- na_icin_ek_bilgi(kategorik_sonuclar, "kategorik")
+
+
+# ======================================================================
+# 20. SONUÇLARI BİRLEŞTİR
+# ======================================================================
+
+tum_sonuclar <- bind_rows(
+  surekli_sonuclar,
+  kategorik_sonuclar
+)
+
+
+# ======================================================================
+# 21. ANA YAYIN TABLOSU  (EK 2: NA ise altta parantez içinde ilk nokta)
+# ======================================================================
+
+ana_tablo <- tum_sonuclar %>%
+  transmute(
+    
+    `Değişken türü` = degisken_tipi,
+    
+    `Etki ölçüsü` = etki_olcusu,
+    
+    `Etki büyüklüğü` = sprintf("%.2f", etki),
+    
+    `Etki düzeyi` = etki_yorumu,
+    
+    `Sabit grup N` = n_sabit,
+    
+    `Gerekli karşı grup N` =
+      ifelse(
+        is.na(gerekli_karsi_n),
+        ifelse(
+          is.na(ilk_ulasilan_sabit_n),
+          "Ulaşılamaz",
+          paste0(
+            "Ulaşılamaz\n(Sabit grup N = ",
+            ilk_ulasilan_sabit_n,
+            " olunca ilk ulaşılır; karşı grup N = ",
+            ilk_ulasilan_karsi_n,
+            ")"
+          )
+        ),
+        as.character(gerekli_karsi_n)
+      ),
+    
+    `Toplam N` =
+      ifelse(
+        is.na(toplam_n),
+        "—",
+        as.character(toplam_n)
+      ),
+    
+    `Güç` = sprintf("%.1f%%", elde_edilen_power * 100),
+    
+    `Sonuç` = durum
+  )
+
+
+# ======================================================================
+# 22. KONSOLDA ANA SONUÇLARI GÖSTER
+# ======================================================================
+
+cat("\n============================================================\n")
+cat("GEREKLİ KARŞI GRUP ÖRNEKLEM SAYILARI\n")
+cat("============================================================\n\n")
+
+print(as.data.frame(ana_tablo), row.names = FALSE)
+
+
+# ======================================================================
+# 23. SÜREKLİ DEĞİŞKEN TABLOSU
+# ======================================================================
+
+surekli_tablo <- ana_tablo %>%
+  filter(`Değişken türü` == "Sürekli değişken") %>%
+  select(-`Değişken türü`)
+
+
+# ======================================================================
+# 24. KATEGORİK DEĞİŞKEN TABLOSU
+# ======================================================================
+
+kategorik_tablo <- ana_tablo %>%
+  filter(`Değişken türü` == "Kategorik değişken") %>%
+  select(-`Değişken türü`)
+
+
+# ======================================================================
+# 25. PRATİK ÖZET TABLO
+# ======================================================================
+
+pratik_tablo <- tum_sonuclar %>%
+  select(degisken_tipi, etki, gerekli_karsi_n) %>%
+  mutate(
+    degisken_tipi =
+      case_when(
+        degisken_tipi == "Sürekli değişken" ~ "Sürekli (Cohen's d)",
+        degisken_tipi == "Kategorik değişken" ~ "Kategorik (Cohen's h)",
+        TRUE ~ degisken_tipi
+      )
+  ) %>%
+  pivot_wider(
+    names_from = degisken_tipi,
+    values_from = gerekli_karsi_n
+  ) %>%
+  mutate(
+    `Etki düzeyi` = sapply(etki, etki_etiketi)
+  ) %>%
+  select(
+    `Etki büyüklüğü` = etki,
+    `Etki düzeyi`,
+    everything()
+  )
+
+
+# ======================================================================
+# 26. PRATİK TABLOYU KONSOLDA GÖSTER
+# ======================================================================
+
+cat("\n============================================================\n")
+cat("PRATİK ÖZET TABLO\n")
+cat("============================================================\n\n")
+
+print(as.data.frame(pratik_tablo), row.names = FALSE)
+
+
+# ======================================================================
+# 27. GT — SÜREKLİ DEĞİŞKENLER  (EK 3: alt satır için <br>)
+# ======================================================================
+
+gt_surekli <- surekli_tablo %>%
+  mutate(
+    `Gerekli karşı grup N` = gsub("\n", "<br>", `Gerekli karşı grup N`)
+  ) %>%
+  gt() %>%
+  fmt_markdown(columns = `Gerekli karşı grup N`) %>%
+  tab_header(
+    title = md(paste0("**", n_sabit, " kişilik sabit gruba karşı gerekli örneklem sayısı**")),
+    subtitle = md("**Sürekli değişkenler — Cohen's d**")
+  ) %>%
+  cols_align(align = "center", columns = everything()) %>%
+  tab_source_note(
+    source_note = md(
+      paste0(
+        "**Varsayımlar:** iki yönlü α = 0.05, hedef güç = %80. ",
+        "Sabit grup N = ", n_sabit,
+        " olarak Excel dosyalarındaki benzersiz kişi sayısından otomatik hesaplanmıştır. ",
+        "Sürekli değişkenler için Cohen's d kullanılmıştır."
+      )
+    )
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(7)
+  )
+
+
+# ======================================================================
+# 28. GT — KATEGORİK DEĞİŞKENLER  (EK 3: alt satır için <br>)
+# ======================================================================
+
+gt_kategorik <- kategorik_tablo %>%
+  mutate(
+    `Gerekli karşı grup N` = gsub("\n", "<br>", `Gerekli karşı grup N`)
+  ) %>%
+  gt() %>%
+  fmt_markdown(columns = `Gerekli karşı grup N`) %>%
+  tab_header(
+    title = md(paste0("**", n_sabit, " kişilik sabit gruba karşı gerekli örneklem sayısı**")),
+    subtitle = md("**İkili kategorik değişkenler — Cohen's h**")
+  ) %>%
+  cols_align(align = "center", columns = everything()) %>%
+  tab_source_note(
+    source_note = md(
+      paste0(
+        "**Varsayımlar:** iki yönlü α = 0.05, hedef güç = %80. ",
+        "Sabit grup N = ", n_sabit,
+        " olarak Excel dosyalarındaki benzersiz kişi sayısından otomatik hesaplanmıştır. ",
+        "İkili kategorik değişkenler için Cohen's h kullanılmıştır."
+      )
+    )
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(14),
+    data_row.padding = px(7)
+  )
+
+
+# ======================================================================
+# 29. GT — PRATİK ÖZET
+# ======================================================================
+
+gt_pratik <- pratik_tablo %>%
+  gt() %>%
+  tab_header(
+    title = md(paste0("**", n_sabit, " kişilik sabit gruba karşı gerekli karşı grup sayısı**")),
+    subtitle = md("Hedef güç = %80 | α = 0.05 | İki yönlü")
+  ) %>%
+  cols_align(align = "center", columns = everything()) %>%
+  tab_source_note(
+    source_note = md(
+      paste0(
+        "Sabit grup N = ", n_sabit,
+        " olup iki Excel dosyasındaki benzersiz kişi sayısından otomatik hesaplanmıştır. ",
+        "Sürekli değişkenler için Cohen's d; ",
+        "ikili kategorik değişkenler için Cohen's h kullanılmıştır."
+      )
+    )
+  ) %>%
+  tab_options(
+    table.font.size = px(13),
+    heading.title.font.size = px(16),
+    heading.subtitle.font.size = px(13),
+    data_row.padding = px(7)
+  )
+
+
+# ======================================================================
+# 30. VIEWER'DA TABLOLARI GÖSTER
+# ======================================================================
+
+gt_surekli
+gt_kategorik
+gt_pratik
+
+
+# ======================================================================
+# 31. WORD İÇİN FLEXTABLE
+# ======================================================================
+
+ft_surekli <- flextable(surekli_tablo)
+ft_surekli <- theme_booktabs(ft_surekli)
+ft_surekli <- bold(ft_surekli, part = "header")
+ft_surekli <- align(ft_surekli, align = "center", part = "all")
+ft_surekli <- autofit(ft_surekli)
+
+ft_kategorik <- flextable(kategorik_tablo)
+ft_kategorik <- theme_booktabs(ft_kategorik)
+ft_kategorik <- bold(ft_kategorik, part = "header")
+ft_kategorik <- align(ft_kategorik, align = "center", part = "all")
+ft_kategorik <- autofit(ft_kategorik)
+
+ft_pratik <- flextable(pratik_tablo)
+ft_pratik <- theme_booktabs(ft_pratik)
+ft_pratik <- bold(ft_pratik, part = "header")
+ft_pratik <- align(ft_pratik, align = "center", part = "all")
+ft_pratik <- autofit(ft_pratik)
+
+
+# ======================================================================
+# 32. DOSYA ADI İÇİN DİNAMİK N
+# ======================================================================
+
+dosya_etiketi <- paste0("Power_N", n_sabit, "_Dinamik")
+
+
+# ======================================================================
+# 33. WORD DOSYASI
+# ======================================================================
+
+word_yolu <- file.path(ana_klasor, paste0(dosya_etiketi, ".docx"))
+
+doc <- read_docx()
+
+doc <- body_add_par(doc, "Örneklem büyüklüğü ve güç analizi", style = "heading 1")
+
+doc <- body_add_par(
+  doc,
+  paste0(
+    "Sabit grup büyüklüğü Excel dosyalarındaki benzersiz ",
+    "kişi sayısından otomatik olarak hesaplanmış ve N = ",
+    n_sabit,
+    " bulunmuştur. İki yönlü alfa düzeyi 0.05 ve hedef ",
+    "istatistiksel güç %80 olarak kabul edilmiştir. ",
+    "Farklı etki büyüklüğü senaryolarında hedef güce ",
+    "ulaşmak için gerekli karşı grup büyüklüğü hesaplanmıştır."
+  )
+)
+
+doc <- body_add_par(doc, "Sürekli değişkenler", style = "heading 2")
+doc <- body_add_flextable(doc, value = ft_surekli)
+
+doc <- body_add_par(doc, "İkili kategorik değişkenler", style = "heading 2")
+doc <- body_add_flextable(doc, value = ft_kategorik)
+
+doc <- body_add_par(doc, "Pratik özet", style = "heading 2")
+doc <- body_add_flextable(doc, value = ft_pratik)
+
+doc <- body_add_par(
+  doc,
+  paste0(
+    "Sürekli değişkenlerde etki büyüklüğü Cohen's d, ",
+    "ikili kategorik değişkenlerde Cohen's h ile ifade edilmiştir. ",
+    "Sabit grup büyüklüğü N = ", n_sabit,
+    " olarak belirlenmiştir. Çok küçük etki büyüklüklerinde ",
+    "yalnızca karşı grubun artırılması hedeflenen %80 güce ",
+    "ulaşmak için yeterli olmayabilir."
+  )
+)
+
+print(doc, target = word_yolu)
+
+
+# ======================================================================
+# 34. EXCEL DOSYASI
+# ======================================================================
+
+excel_yolu <- file.path(ana_klasor, paste0(dosya_etiketi, ".xlsx"))
+
+veri_ozeti <- data.frame(
+  Degisken = c(
+    "leep_tlh.xlsx benzersiz hasta",
+    "veri_toplama.xlsx benzersiz hasta",
+    "Birleştirilmiş benzersiz hasta",
+    "Sabit grup N",
+    "Alfa",
+    "Hedef power"
+  ),
+  Deger = c(
+    n_leep,
+    n_veri_toplama,
+    n_sabit,
+    n_sabit,
+    alfa,
+    hedef_power
+  )
+)
+
+write_xlsx(
+  list(
+    "Veri_Ozeti" = veri_ozeti,
+    "Pratik_Ozet" = as.data.frame(pratik_tablo),
+    "Surekli_Cohen_d" = as.data.frame(surekli_sonuclar),
+    "Kategorik_Cohen_h" = as.data.frame(kategorik_sonuclar),
+    "Tum_Sonuclar" = as.data.frame(tum_sonuclar),
+    "Benzersiz_Hastalar" = as.data.frame(benzersiz_hastalar)
+  ),
+  path = excel_yolu
+)
+
+
+# ======================================================================
+# 35. HTML DOSYASI
+# ======================================================================
+
+html_yolu <- file.path(ana_klasor, paste0(dosya_etiketi, ".html"))
+
+gtsave(gt_pratik, filename = html_yolu)
+
+
+# ======================================================================
+# 36. DOSYA KONTROLÜ
+# ======================================================================
+
+cat("\n============================================================\n")
+cat("DOSYA KONTROLÜ\n")
+cat("============================================================\n\n")
+
+cat("Kullanılan dinamik sabit N =", n_sabit, "\n\n")
+cat("Word oluşturuldu mu?:", file.exists(word_yolu), "\n")
+cat("Excel oluşturuldu mu?:", file.exists(excel_yolu), "\n")
+cat("HTML oluşturuldu mu?:", file.exists(html_yolu), "\n\n")
+cat("WORD:\n", word_yolu, "\n\n")
+cat("EXCEL:\n", excel_yolu, "\n\n")
+cat("HTML:\n", html_yolu, "\n\n")
+
+
+# ======================================================================
+# 37. SON KONTROL
+# ======================================================================
+
+cat("============================================================\n")
+cat("ANALİZ TAMAMLANDI\n")
+cat("============================================================\n\n")
+
+cat("Excel dosyalarından hesaplanan benzersiz kişi sayısı =", n_sabit, "\n")
+cat("Bu sayı bütün power analizlerinde sabit grup N olarak kullanıldı.\n\n")
+
+
+# ======================================================================
+# 38. SON OLARAK VIEWER'DA PRATİK TABLOYU GÖSTER
+# ======================================================================
+
+gt_pratik
